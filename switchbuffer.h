@@ -20,7 +20,9 @@ private:
   SwitchBuffer(size_t count);
   ~SwitchBuffer();
 
-  void increment(typename std::vector<Buffer>::iterator &it);
+  void IncrementProducer();
+  void IncrementConsumer();
+  void Increment(typename std::vector<Buffer>::iterator &it);
 
 private:
   std::mutex m_mtx;
@@ -29,6 +31,8 @@ private:
   Buffer m_slotConsumer;
   typename std::vector<Buffer>::iterator m_itProducer;
   typename std::vector<Buffer>::iterator m_itConsumer;
+  bool m_isFull;
+  bool m_isEmpty;
   std::promise<Buffer const &> *m_promise;
   bool m_isFirst;
   bool m_closedProducer;

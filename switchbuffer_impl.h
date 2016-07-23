@@ -52,7 +52,7 @@ Buffer &SwitchBuffer<Buffer>::GetProducer()
       m_promise = nullptr;
     }
     else {
-      increment(m_itProducer);
+      IncrementProducer();
 
       std::swap(*m_itProducer, m_slotProducer);
     }
@@ -69,13 +69,13 @@ std::future<Buffer const &> SwitchBuffer<Buffer>::GetConsumer()
 {
   std::lock_guard<std::mutex> lock(m_mtx);
 
-  if (m_itConsumer == m_itProducer) {
-    // SwitchBuffer is empty. Create a promise to fulfill on next Production
+  if (m_isEmpty) {
+    // create a promise to fulfill on next Production
     m_promise = new std::promise<Buffer const &>();
     return m_promise->get_future();
   }
   else {
-    increment(m_itConsumer);
+    IncrementConsumer();
 
     std::swap(*m_itConsumer, m_slotConsumer);
 
@@ -90,6 +90,8 @@ SwitchBuffer<Buffer>::SwitchBuffer(size_t count)
   : m_ring(count - 2, Buffer())
   , m_itProducer(m_ring.begin())
   , m_itConsumer(m_ring.begin())
+  , m_isFull(false)
+  , m_isEmpty(true)
   , m_promise(nullptr)
   , m_isFirst(true)
   , m_closedProducer(false)
@@ -106,10 +108,34 @@ SwitchBuffer<Buffer>::~SwitchBuffer()
 }
 
 template<typename Buffer>
-void SwitchBuffer<Buffer>::increment(typename std::vector<Buffer>::iterator &it)
+void SwitchBuffer<Buffer>::IncrementProducer()
 {
-  if (next(it) == m_ring.end())
-    it = m_ring.begin();
+  m_isEmpty = false;
+
+  // push consumer ahead to maintain order
+  if (m_isFull)
+    Increment(m_itConsumer);
+
+  Increment(m_itProducer);
+
+  m_isFull = (m_itProducer == m_itConsumer);
+}
+
+template<typename Buffer>
+void SwitchBuffer<Buffer>::IncrementConsumer()
+{
+  m_isFull = false;
+
+  Increment(m_itConsumer);
+
+  m_isEmpty = (m_itProducer == m_itConsumer);
+}
+
+template<typename Buffer>
+void SwitchBuffer<Buffer>::Increment(typename std::vector<Buffer>::iterator &it)
+{
+  if (next(it) == end(m_ring))
+    it = begin(m_ring);
   else
     ++it;
 }
