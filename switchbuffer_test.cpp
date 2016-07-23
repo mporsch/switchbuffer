@@ -57,7 +57,7 @@ void Producer(SwitchBuffer<Buffer> *sbuf)
 void Consumer(SwitchBuffer<Buffer> *sbuf)
 try
 {
-  while (!shouldStop)
+  while (true)
   {
     // get a future for the next Buffer
     future<Buffer const &> future = sbuf->GetConsumer();
@@ -94,7 +94,7 @@ int main(int, char **)
   signal(SIGINT, SignalHandler);
 
   // create SwitchBuffer. Will be released by Producer and Consumer
-  SwitchBuffer<Buffer> *sbuf = SwitchBuffer<Buffer>::Create(3);
+  SwitchBuffer<Buffer> *sbuf = SwitchBuffer<Buffer>::Create(5);
 
   // start Producer and Consumer threads
   shouldStop = false;
