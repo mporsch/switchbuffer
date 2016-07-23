@@ -50,14 +50,12 @@ Buffer &SwitchBuffer<Buffer>::GetProducer()
       m_promise->set_value(m_slotConsumer);
       delete m_promise;
       m_promise = nullptr;
-    }
-    else {
+    } else {
       IncrementProducer();
 
       std::swap(*m_itProducer, m_slotProducer);
     }
-  }
-  else {
+  } else {
     m_isFirst = false;
   }
 
@@ -70,11 +68,15 @@ std::future<Buffer const &> SwitchBuffer<Buffer>::GetConsumer()
   std::lock_guard<std::mutex> lock(m_mtx);
 
   if (m_isEmpty) {
-    // create a promise to fulfill on next Production
-    m_promise = new std::promise<Buffer const &>();
-    return m_promise->get_future();
-  }
-  else {
+    if (m_closedProducer) {
+      // create a promise to be broken immediately
+      return std::promise<Buffer const &>().get_future();
+    } else {
+      // create a promise to fulfill on next Production
+      m_promise = new std::promise<Buffer const &>();
+      return m_promise->get_future();
+    }
+  } else {
     IncrementConsumer();
 
     std::swap(*m_itConsumer, m_slotConsumer);
