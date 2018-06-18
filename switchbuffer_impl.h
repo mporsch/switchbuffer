@@ -5,142 +5,193 @@
 # error Include this file via switchbuffer.h only
 #endif
 
-template<typename Buffer>
-SwitchBuffer<Buffer> *SwitchBuffer<Buffer>::Create(size_t count)
+#include <mutex>
+#include <vector>
+
+namespace detail
 {
-  return new SwitchBuffer<Buffer>(count);
-}
+  template<typename Buffer>
+  struct SwitchBufferImpl
+  {
+    std::mutex mtx;
+    std::vector<Buffer> ring;
+    Buffer slotProducer;
+    Buffer slotConsumer;
+    typename std::vector<Buffer>::iterator itProducer;
+    typename std::vector<Buffer>::iterator itConsumer;
+    bool isFull;
+    bool isEmpty;
+    std::unique_ptr<std::promise<Buffer const &>> promise;
+    bool isFirst;
+    bool closedProducer;
 
-template<typename Buffer>
-void SwitchBuffer<Buffer>::ReleaseProducer()
-{
-  std::lock_guard<std::mutex> lock(m_mtx);
-  m_closedProducer = true;
+    SwitchBufferImpl(size_t count)
+      : ring(count - 2, Buffer())
+      , itProducer(ring.begin())
+      , itConsumer(ring.begin())
+      , isFull(false)
+      , isEmpty(true)
+      , promise(nullptr)
+      , isFirst(true)
+      , closedProducer(false)
+    {}
 
-  // if there is an open promise, break it
-  if (m_promise) {
-    delete m_promise;
-    m_promise = nullptr;
-  }
+    ~SwitchBufferImpl()
+    {}
 
-  if (m_closedConsumer)
-    delete this;
-}
+    Buffer &SwitchProducer()
+    {
+      std::lock_guard<std::mutex> lock(mtx);
 
-template<typename Buffer>
-void SwitchBuffer<Buffer>::ReleaseConsumer()
-{
-  std::lock_guard<std::mutex> lock(m_mtx);
-  m_closedConsumer = true;
+      if (isFirst) {
+        isFirst = false;
+      } else {
+        // if there is an open promise, fulfill it
+        if (promise) {
+          // immediately swap consumer and producer slot
+          std::swap(slotProducer, slotConsumer);
+          promise->set_value(slotConsumer);
+          promise.reset();
+        } else {
+          IncrementProducer();
 
-  if (m_closedProducer)
-    delete this;
-}
+          std::swap(*itProducer, slotProducer);
+        }
+      }
 
-template<typename Buffer>
-Buffer &SwitchBuffer<Buffer>::GetProducer()
-{
-  std::lock_guard<std::mutex> lock(m_mtx);
-
-  if (!m_isFirst) {
-    // if there is an open promise, fulfill it
-    if (m_promise) {
-      // immediately swap consumer and producer slot
-      std::swap(m_slotProducer, m_slotConsumer);
-      m_promise->set_value(m_slotConsumer);
-      delete m_promise;
-      m_promise = nullptr;
-    } else {
-      IncrementProducer();
-
-      std::swap(*m_itProducer, m_slotProducer);
+      return slotProducer;
     }
-  } else {
-    m_isFirst = false;
-  }
 
-  return m_slotProducer;
-}
+    std::future<Buffer const &> SwitchConsumer()
+    {
+      std::lock_guard<std::mutex> lock(mtx);
 
-template<typename Buffer>
-std::future<Buffer const &> SwitchBuffer<Buffer>::GetConsumer()
-{
-  std::lock_guard<std::mutex> lock(m_mtx);
+      if (isEmpty) {
+        if (closedProducer) {
+          // create a promise to be broken immediately
+          return std::promise<Buffer const &>().get_future();
+        } else {
+          // create a promise to fulfill on next Production
+          promise.reset(new std::promise<Buffer const &>());
+          return promise->get_future();
+        }
+      } else {
+        IncrementConsumer();
 
-  if (m_isEmpty) {
-    if (m_closedProducer) {
-      // create a promise to be broken immediately
-      return std::promise<Buffer const &>().get_future();
-    } else {
-      // create a promise to fulfill on next Production
-      m_promise = new std::promise<Buffer const &>();
-      return m_promise->get_future();
+        std::swap(*itConsumer, slotConsumer);
+
+        std::promise<Buffer const &> p;
+        p.set_value(slotConsumer);
+        return p.get_future();
+      }
     }
-  } else {
-    IncrementConsumer();
 
-    std::swap(*m_itConsumer, m_slotConsumer);
+    void CloseProducer()
+    {
+      std::lock_guard<std::mutex> lock(mtx);
 
-    std::promise<Buffer const &> p;
-    p.set_value(m_slotConsumer);
-    return p.get_future();
-  }
+      closedProducer = true;
+
+      // if there is an open promise, break it
+      promise.reset();
+    }
+
+    void CloseConsumer()
+    {}
+
+    void IncrementProducer()
+    {
+      isEmpty = false;
+
+      // push consumer ahead to maintain order
+      if (isFull)
+        Increment(itConsumer);
+
+      Increment(itProducer);
+
+      isFull = (itProducer == itConsumer);
+    }
+
+    void IncrementConsumer()
+    {
+      isFull = false;
+
+      Increment(itConsumer);
+
+      isEmpty = (itProducer == itConsumer);
+    }
+
+    void Increment(typename std::vector<Buffer>::iterator &it)
+    {
+      if (next(it) == end(ring))
+        it = begin(ring);
+      else
+        ++it;
+    }
+  };
+} // namespace detail
+
+template<typename Buffer>
+SwitchBufferProducer<Buffer>::~SwitchBufferProducer()
+{
+  m_impl->CloseProducer();
 }
 
 template<typename Buffer>
-SwitchBuffer<Buffer>::SwitchBuffer(size_t count)
-  : m_ring(count - 2, Buffer())
-  , m_itProducer(m_ring.begin())
-  , m_itConsumer(m_ring.begin())
-  , m_isFull(false)
-  , m_isEmpty(true)
-  , m_promise(nullptr)
-  , m_isFirst(true)
-  , m_closedProducer(false)
-  , m_closedConsumer(false)
+Buffer &SwitchBufferProducer<Buffer>::Switch()
 {
+  return m_impl->SwitchProducer();
+}
+
+template<typename Buffer>
+SwitchBufferProducer<Buffer>::SwitchBufferProducer(std::shared_ptr<detail::SwitchBufferImpl<Buffer>> impl)
+  : m_impl(std::move(impl))
+{}
+
+
+template<typename Buffer>
+SwitchBufferConsumer<Buffer>::~SwitchBufferConsumer()
+{
+  m_impl->CloseConsumer();
+}
+
+template<typename Buffer>
+std::future<Buffer const &> SwitchBufferConsumer<Buffer>::Switch()
+{
+  return m_impl->SwitchConsumer();
+}
+
+template<typename Buffer>
+SwitchBufferConsumer<Buffer>::SwitchBufferConsumer(std::shared_ptr<detail::SwitchBufferImpl<Buffer>> impl)
+  : m_impl(std::move(impl))
+{}
+
+
+template<typename Buffer>
+std::unique_ptr<SwitchBuffer<Buffer>> SwitchBuffer<Buffer>::Create(size_t count)
+{
+  return std::unique_ptr<SwitchBuffer<Buffer>>(new SwitchBuffer<Buffer>(count));
 }
 
 template<typename Buffer>
 SwitchBuffer<Buffer>::~SwitchBuffer()
+{}
+
+template<typename Buffer>
+std::unique_ptr<SwitchBufferProducer<Buffer>> SwitchBuffer<Buffer>::GetProducer()
 {
-  // if there is an open promise, break it
-  if (m_promise)
-    delete m_promise;
+  return std::unique_ptr<SwitchBufferProducer<Buffer>>(new SwitchBufferProducer<Buffer>(m_impl));
 }
 
 template<typename Buffer>
-void SwitchBuffer<Buffer>::IncrementProducer()
+std::unique_ptr<SwitchBufferConsumer<Buffer>> SwitchBuffer<Buffer>::GetConsumer()
 {
-  m_isEmpty = false;
-
-  // push consumer ahead to maintain order
-  if (m_isFull)
-    Increment(m_itConsumer);
-
-  Increment(m_itProducer);
-
-  m_isFull = (m_itProducer == m_itConsumer);
+  return std::unique_ptr<SwitchBufferConsumer<Buffer>>(new SwitchBufferConsumer<Buffer>(m_impl));
 }
 
 template<typename Buffer>
-void SwitchBuffer<Buffer>::IncrementConsumer()
-{
-  m_isFull = false;
-
-  Increment(m_itConsumer);
-
-  m_isEmpty = (m_itProducer == m_itConsumer);
-}
-
-template<typename Buffer>
-void SwitchBuffer<Buffer>::Increment(typename std::vector<Buffer>::iterator &it)
-{
-  if (next(it) == end(m_ring))
-    it = begin(m_ring);
-  else
-    ++it;
-}
+SwitchBuffer<Buffer>::SwitchBuffer(size_t count)
+  : m_impl(std::shared_ptr<detail::SwitchBufferImpl<Buffer>>(new detail::SwitchBufferImpl<Buffer>(count)))
+{}
 
 #endif // SWITCHBUFFER_IMPL_H
-
