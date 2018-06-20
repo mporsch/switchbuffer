@@ -59,7 +59,6 @@ public:
 private:
   std::shared_ptr<detail::SwitchBufferImpl<Buffer>> m_impl;
   std::unique_ptr<SwitchBufferProducer<Buffer>> m_producer;
-  std::unique_ptr<SwitchBufferConsumer<Buffer>> m_consumer;
 };
 
 #include "switchbuffer_impl.h"

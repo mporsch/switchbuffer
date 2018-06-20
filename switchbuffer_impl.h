@@ -5,6 +5,8 @@
 # error Include this file via switchbuffer.h only
 #endif
 
+#include <cassert>
+#include <map>
 #include <mutex>
 #include <vector>
 
@@ -13,120 +15,168 @@ namespace detail
   template<typename Buffer>
   struct SwitchBufferImpl
   {
+    using Ring = std::vector<std::unique_ptr<Buffer>>;
+
+    struct Producer
+    {
+      typename Ring::size_type pos;
+      bool isFirst;
+      bool isClosed;
+
+      Producer()
+        : pos(0U)
+        , isFirst(true)
+        , isClosed(false)
+      {}
+    };
+
+    struct Consumer
+    {
+      typename Ring::size_type pos;
+      bool isFirst;
+      bool isFull;
+      bool isEmpty;
+      std::unique_ptr<Buffer> buffer;
+      std::unique_ptr<std::promise<Buffer const &>> promise;
+
+      Consumer(typename Ring::size_type first)
+        : pos(first)
+        , isFirst(true)
+        , isFull(false)
+        , isEmpty(true)
+        , buffer(new Buffer)
+      {}
+    };
+    using ConsumerMap = std::map<SwitchBufferConsumer<Buffer> *, Consumer>;
+
+    Ring ring;
+    Producer producer;
+    ConsumerMap consumers;
     std::mutex mtx;
-    std::vector<Buffer> ring;
-    Buffer slotProducer;
-    Buffer slotConsumer;
-    typename std::vector<Buffer>::iterator itProducer;
-    typename std::vector<Buffer>::iterator itConsumer;
-    bool isFull;
-    bool isEmpty;
-    std::unique_ptr<std::promise<Buffer const &>> promise;
-    bool isFirst;
-    bool closedProducer;
 
     SwitchBufferImpl(size_t count)
-      : ring(count - 2, Buffer())
-      , itProducer(ring.begin())
-      , itConsumer(ring.begin())
-      , isFull(false)
-      , isEmpty(true)
-      , promise(nullptr)
-      , isFirst(true)
-      , closedProducer(false)
-    {}
-
-    ~SwitchBufferImpl()
-    {}
-
-    Buffer &SwitchProducer()
     {
-      std::lock_guard<std::mutex> lock(mtx);
-
-      if (isFirst) {
-        isFirst = false;
-      } else {
-        // if there is an open promise, fulfill it
-        if (promise) {
-          // immediately swap consumer and producer slot
-          std::swap(slotProducer, slotConsumer);
-          promise->set_value(slotConsumer);
-          promise.reset();
-        } else {
-          IncrementProducer();
-
-          std::swap(*itProducer, slotProducer);
-        }
-      }
-
-      return slotProducer;
+      ring.reserve(count);
+      for (size_t i = 0; i < count; ++i)
+        ring.emplace_back(new Buffer);
     }
 
-    std::future<Buffer const &> SwitchConsumer()
+    ~SwitchBufferImpl()
+    {
+      // the consumers must have been destroyed beforehand
+      assert(consumers.empty());
+    }
+
+    void CreateConsumer(SwitchBufferConsumer<Buffer> *iface)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      if (isEmpty) {
-        if (closedProducer) {
-          // create a promise to be broken immediately
-          return std::promise<Buffer const &>().get_future();
-        } else {
-          // create a promise to fulfill on next Production
-          promise.reset(new std::promise<Buffer const &>());
-          return promise->get_future();
-        }
-      } else {
-        IncrementConsumer();
-
-        std::swap(*itConsumer, slotConsumer);
-
-        std::promise<Buffer const &> p;
-        p.set_value(slotConsumer);
-        return p.get_future();
-      }
+      (void)consumers.emplace(std::make_pair(iface, Consumer(producer.pos)));
     }
 
     void CloseProducer()
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      closedProducer = true;
+      producer.isClosed = true;
 
-      // if there is an open promise, break it
-      promise.reset();
+      // if there are open promises, break them
+      for (auto &&consumer : consumers)
+        consumer.second.promise.reset();
     }
 
-    void CloseConsumer()
-    {}
+    void CloseConsumer(SwitchBufferConsumer<Buffer> *iface)
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+
+      auto it = consumers.find(iface);
+      assert(it != end(consumers));
+      (void)consumers.erase(it);
+    }
+
+    Buffer &SwitchProducer()
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+
+      if (producer.isFirst) {
+        producer.isFirst = false;
+      } else {
+        IncrementProducer();
+
+        // if there are open promises, fulfill them
+        for (auto &&p : consumers) {
+          auto &&consumer = p.second;
+          if (consumer.promise) {
+            consumer.promise->set_value(*ring[consumer.pos]);
+            consumer.promise.reset();
+          }
+        }
+      }
+
+      return *ring[producer.pos];
+    }
+
+    std::future<Buffer const &> SwitchConsumer(SwitchBufferConsumer<Buffer> *iface)
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+
+      auto &&consumer = consumers.at(iface);
+
+      if (consumer.isFirst) {
+        consumer.isFirst = false;
+
+        // create a promise to fulfill on next Production
+        consumer.promise.reset(new std::promise<Buffer const &>());
+        return consumer.promise->get_future();
+      } else {
+        IncrementConsumer(consumer);
+
+        if (consumer.isEmpty) {
+          if (producer.isClosed) {
+            // create a promise to be broken immediately
+            return std::promise<Buffer const &>().get_future();
+          } else {
+            // create a promise to fulfill on next Production
+            consumer.promise.reset(new std::promise<Buffer const &>());
+            return consumer.promise->get_future();
+          }
+        } else {
+          std::promise<Buffer const &> p;
+          p.set_value(*ring[consumer.pos]);
+          return p.get_future();
+        }
+      }
+    }
 
     void IncrementProducer()
     {
-      isEmpty = false;
+      Increment(producer.pos);
 
-      // push consumer ahead to maintain order
-      if (isFull)
-        Increment(itConsumer);
+      for (auto &&p : consumers) {
+        auto &&consumer = p.second;
+        if (consumer.pos == producer.pos) {
+          consumer.isFull = true;
 
-      Increment(itProducer);
-
-      isFull = (itProducer == itConsumer);
+          std::swap(ring[producer.pos], consumer.buffer);
+        }
+      }
     }
 
-    void IncrementConsumer()
+    void IncrementConsumer(Consumer &consumer)
     {
-      isFull = false;
+      if (consumer.isFull) {
+        consumer.isFull = false;
+        consumer.pos = producer.pos;
+      }
+      Increment(consumer.pos);
 
-      Increment(itConsumer);
-
-      isEmpty = (itProducer == itConsumer);
+      consumer.isEmpty = (consumer.pos == producer.pos);
     }
 
-    void Increment(typename std::vector<Buffer>::iterator &it)
+    void Increment(typename Ring::size_type &pos)
     {
-      if (next(it) == end(ring))
-        it = begin(ring);
-      else
-        ++it;
+      ++pos;
+      pos %= ring.size();
     }
   };
 } // namespace detail
@@ -152,13 +202,13 @@ SwitchBufferProducer<Buffer>::SwitchBufferProducer(std::shared_ptr<detail::Switc
 template<typename Buffer>
 SwitchBufferConsumer<Buffer>::~SwitchBufferConsumer()
 {
-  m_impl->CloseConsumer();
+  m_impl->CloseConsumer(this);
 }
 
 template<typename Buffer>
 std::future<Buffer const &> SwitchBufferConsumer<Buffer>::Switch()
 {
-  return m_impl->SwitchConsumer();
+  return m_impl->SwitchConsumer(this);
 }
 
 template<typename Buffer>
@@ -171,7 +221,6 @@ template<typename Buffer>
 SwitchBuffer<Buffer>::SwitchBuffer(size_t count)
   : m_impl(std::shared_ptr<detail::SwitchBufferImpl<Buffer>>(new detail::SwitchBufferImpl<Buffer>(count)))
   , m_producer(new SwitchBufferProducer<Buffer>(m_impl))
-  , m_consumer(new SwitchBufferConsumer<Buffer>(m_impl))
 {}
 
 template<typename Buffer>
@@ -190,10 +239,9 @@ std::unique_ptr<SwitchBufferProducer<Buffer>> SwitchBuffer<Buffer>::GetProducer(
 template<typename Buffer>
 std::unique_ptr<SwitchBufferConsumer<Buffer>> SwitchBuffer<Buffer>::GetConsumer()
 {
-  if (!m_consumer)
-    throw std::logic_error("SwitchBuffer: only one consumer supported");
-  else
-    return std::move(m_consumer);
+  auto ret = std::unique_ptr<SwitchBufferConsumer<Buffer>>(new SwitchBufferConsumer<Buffer>(m_impl));
+  m_impl->CreateConsumer(ret.get());
+  return ret;
 }
 
 #endif // SWITCHBUFFER_IMPL_H
