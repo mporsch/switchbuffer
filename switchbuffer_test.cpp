@@ -100,10 +100,10 @@ int main(int, char **)
   thread consumer;
   {
     // create SwitchBuffer. Will be released by Producer and Consumer
-    auto sbuf = SwitchBuffer<Buffer>::Create(5);
+    SwitchBuffer<Buffer> sbuf(5);
 
-    producer = thread(Producer, sbuf->GetProducer());
-    consumer = thread(Consumer, sbuf->GetConsumer());
+    producer = thread(Producer, sbuf.GetProducer());
+    consumer = thread(Consumer, sbuf.GetConsumer());
   }
 
   // block until Producer and Consumer are done

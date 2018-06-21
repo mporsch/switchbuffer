@@ -51,13 +51,10 @@ template<typename Buffer>
 class SwitchBuffer
 {
 public:
-  static std::unique_ptr<SwitchBuffer<Buffer>> Create(size_t count);
+  SwitchBuffer(size_t count);
   ~SwitchBuffer();
   std::unique_ptr<SwitchBufferProducer<Buffer>> GetProducer();
   std::unique_ptr<SwitchBufferConsumer<Buffer>> GetConsumer();
-
-private:
-  SwitchBuffer(size_t count);
 
 private:
   std::shared_ptr<detail::SwitchBufferImpl<Buffer>> m_impl;

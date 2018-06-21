@@ -168,10 +168,11 @@ SwitchBufferConsumer<Buffer>::SwitchBufferConsumer(std::shared_ptr<detail::Switc
 
 
 template<typename Buffer>
-std::unique_ptr<SwitchBuffer<Buffer>> SwitchBuffer<Buffer>::Create(size_t count)
-{
-  return std::unique_ptr<SwitchBuffer<Buffer>>(new SwitchBuffer<Buffer>(count));
-}
+SwitchBuffer<Buffer>::SwitchBuffer(size_t count)
+  : m_impl(std::shared_ptr<detail::SwitchBufferImpl<Buffer>>(new detail::SwitchBufferImpl<Buffer>(count)))
+  , m_producer(new SwitchBufferProducer<Buffer>(m_impl))
+  , m_consumer(new SwitchBufferConsumer<Buffer>(m_impl))
+{}
 
 template<typename Buffer>
 SwitchBuffer<Buffer>::~SwitchBuffer()
@@ -194,12 +195,5 @@ std::unique_ptr<SwitchBufferConsumer<Buffer>> SwitchBuffer<Buffer>::GetConsumer(
   else
     return std::move(m_consumer);
 }
-
-template<typename Buffer>
-SwitchBuffer<Buffer>::SwitchBuffer(size_t count)
-  : m_impl(std::shared_ptr<detail::SwitchBufferImpl<Buffer>>(new detail::SwitchBufferImpl<Buffer>(count)))
-  , m_producer(new SwitchBufferProducer<Buffer>(m_impl))
-  , m_consumer(new SwitchBufferConsumer<Buffer>(m_impl))
-{}
 
 #endif // SWITCHBUFFER_IMPL_H
