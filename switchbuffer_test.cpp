@@ -3,6 +3,7 @@
 #include <thread>          // for std::thread
 #include <atomic>          // for std::atomic
 #include <csignal>         // for signal
+#include <iomanip>         // for std::setfill
 #include <iostream>        // for std::cout
 #include <random>          // for std::uniform_int_distribution
 
@@ -36,11 +37,11 @@ void Producer(unique_ptr<SwitchBufferProducer<Buffer>> sbuf)
     this_thread::sleep_for(chrono::milliseconds(distribution(generator)));
 
     // produce something
-    Buffer tmp{++i, ++i, ++i};
+    Buffer tmp{++i, i, i};
 
     { // print
       lock_guard<mutex> lock(printMutex);
-      cout << "Producing ";
+      cout << "Producer creating ";
       for (auto &&e : tmp)
       {
         cout << (int)e << ", ";
@@ -56,7 +57,7 @@ void Producer(unique_ptr<SwitchBufferProducer<Buffer>> sbuf)
 }
 
 /// Consumer thread
-void Consumer(unique_ptr<SwitchBufferConsumer<Buffer>> sbuf)
+void Consumer(size_t threadId, unique_ptr<SwitchBufferConsumer<Buffer>> sbuf)
 try
 {
   while (true)
@@ -72,17 +73,19 @@ try
 
     { // print
       lock_guard<mutex> lock(printMutex);
-      cout << "Consuming ";
+      for (size_t i = 0; i <= threadId; ++i)
+        cout << '\t';
+      cout << "Consumer " << threadId << " obtained ";
       for (auto &&e : buf)
       {
-         cout << (int)e << ", ";
+         cout << std::setw(3) << std::setfill(' ') << (int)e << ", ";
       }
       cout << endl;
     }
   }
 
   lock_guard<mutex> lock(printMutex);
-  cout << "Releasing Consumer...\n";
+  cout << std::this_thread::get_id() << ": Releasing Consumer " << threadId << "...\n";
 }
 catch(future_error const &)
 {
@@ -97,20 +100,22 @@ int main(int, char **)
 
   // start Producer and Consumer threads
   thread producer;
-  thread consumer;
+  thread consumers[2];
   {
-    // create SwitchBuffer. Will be released by Producer and Consumer
+    // create SwitchBuffer. Will be released by Producer and Consumers
     SwitchBuffer<Buffer> sbuf(5);
 
     producer = thread(Producer, sbuf.GetProducer());
-    consumer = thread(Consumer, sbuf.GetConsumer());
+    for (size_t i = 0; i < std::extent<decltype(consumers)>::value; ++i)
+      consumers[i] = thread(Consumer, i, sbuf.GetConsumer());
   }
 
-  // block until Producer and Consumer are done
+  // block until Producer and Consumers are done
   if (producer.joinable())
     producer.join();
-  if (consumer.joinable())
-    consumer.join();
+  for (auto &&consumer : consumers)
+    if (consumer.joinable())
+      consumer.join();
 
   return EXIT_SUCCESS;
 }
