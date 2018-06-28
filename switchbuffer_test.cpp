@@ -1,19 +1,31 @@
 #include "switchbuffer.h"
 
-#include <thread>          // for std::thread
+#include <array>           // for std::array
 #include <atomic>          // for std::atomic
 #include <csignal>         // for signal
 #include <iomanip>         // for std::setfill
 #include <iostream>        // for std::cout
 #include <random>          // for std::uniform_int_distribution
+#include <thread>          // for std::thread
+
+#define CONSUMER_COUNT 3
+#define PRINT_LINES 30
 
 using namespace std;
-using Buffer = vector<unsigned char>;
+using Buffer = unsigned int;
+struct Status : public std::array<char, CONSUMER_COUNT>
+{
+  Status()
+  {
+    this->fill(' ');
+  }
+};
 
-mutex printMutex;                                    ///< Mutex to unmangle cout output
-atomic<bool> shouldStop(false);                      ///< Thread watch variable
-default_random_engine generator;                     ///< Random generator
-uniform_int_distribution<int> distribution(1, 100);  ///< Random distribution
+mutex printMutex;                                     ///< Mutex to unmangle cout output
+map<Buffer, Status> statusMap;                        ///< Status of Produce-Consume
+atomic<bool> shouldStop(false);                       ///< Thread watch variable
+default_random_engine generator;                      ///< Random generator
+uniform_int_distribution<int> distribution(1, 1000);  ///< Random distribution
 
 /// Handler for Ctrl-C
 void SignalHandler(int)
@@ -23,33 +35,45 @@ void SignalHandler(int)
   shouldStop = true;
 }
 
+void ClearTerminal()
+{
+  // CSI[2J clears screen, CSI[H moves the cursor to top-left corner
+  cout << "\x1B[2J\x1B[H";
+}
+
+void PrintStatus()
+{
+  ClearTerminal();
+  for (auto &&p : statusMap) {
+    cout << setw(3) << setfill(' ') << p.first << ": ";
+    for (auto &&consumerStatus : p.second)
+      cout << "|" << consumerStatus;
+    cout << "|\n";
+  }
+}
+
 /// Producer thread
 void Producer(unique_ptr<SwitchBufferProducer<Buffer>> sbuf)
 {
-  unsigned char i = 0;
+  Buffer i{};
 
   while (!shouldStop)
   {
     // get a buffer to write to
     Buffer &buf = sbuf->Switch();
 
-    // simulate some processing delay
-    this_thread::sleep_for(chrono::milliseconds(distribution(generator)));
-
     // produce something
-    Buffer tmp{++i, i, i};
+    buf = i++;
+    i %= PRINT_LINES;
 
     { // print
       lock_guard<mutex> lock(printMutex);
-      cout << "Producer creating ";
-      for (auto &&e : tmp)
-      {
-        cout << (int)e << ", ";
-      }
-      cout << endl;
+      statusMap[buf] = Status{};
+      PrintStatus();
     }
 
-    buf = move(tmp);
+    // simulate some processing delay
+    this_thread::sleep_for(chrono::milliseconds(distribution(generator)));
   }
 
   lock_guard<mutex> lock(printMutex);
@@ -65,27 +89,25 @@ try
     // get a future for the next Buffer
     future<Buffer const &> future = sbuf->Switch();
 
+    // check if Buffer is available immediately
+    bool wasDelayed = (future.wait_for(chrono::seconds(0)) == future_status::timeout);
+
     // wait for the Buffer to become available
     Buffer const &buf = future.get();
 
-    // simulate some processing delay
-    this_thread::sleep_for(chrono::milliseconds(distribution(generator)));
-
     { // print
       lock_guard<mutex> lock(printMutex);
-      for (size_t i = 0; i <= threadId; ++i)
-        cout << '\t';
-      cout << "Consumer " << threadId << " obtained ";
-      for (auto &&e : buf)
-      {
-         cout << std::setw(3) << std::setfill(' ') << (int)e << ", ";
-      }
-      cout << endl;
+      auto &&status = statusMap[buf];
+      status[threadId] = (wasDelayed ? 'd' : 'x');
+      PrintStatus();
     }
+
+    // simulate some processing delay
+    this_thread::sleep_for(chrono::milliseconds(distribution(generator)));
   }
 
   lock_guard<mutex> lock(printMutex);
-  cout << std::this_thread::get_id() << ": Releasing Consumer " << threadId << "...\n";
+  cout << this_thread::get_id() << ": Releasing Consumer " << threadId << "...\n";
 }
 catch(future_error const &)
 {
@@ -100,13 +122,13 @@ int main(int, char **)
 
   // start Producer and Consumer threads
   thread producer;
-  thread consumers[2];
+  thread consumers[CONSUMER_COUNT];
   {
     // create SwitchBuffer. Will be released by Producer and Consumers
     SwitchBuffer<Buffer> sbuf(5);
 
     producer = thread(Producer, sbuf.GetProducer());
-    for (size_t i = 0; i < std::extent<decltype(consumers)>::value; ++i)
+    for (size_t i = 0; i < extent<decltype(consumers)>::value; ++i)
       consumers[i] = thread(Consumer, i, sbuf.GetConsumer());
   }
 
@@ -119,4 +141,3 @@ int main(int, char **)
 
   return EXIT_SUCCESS;
 }
-
