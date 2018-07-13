@@ -17,41 +17,90 @@ namespace detail
   {
     using Ring = std::vector<std::unique_ptr<Buffer>>;
 
+    class RingIterator
+    {
+    public:
+      RingIterator(Ring *ring)
+        : m_ring(ring)
+        , m_pos(ring->size())
+      {}
+
+      RingIterator &operator++()
+      {
+        ++m_pos;
+        m_pos %= m_ring->size();
+        return *this;
+      }
+
+      RingIterator operator++(int)
+      {
+        RingIterator ret = *this;
+        (void)++*this;
+        return ret;
+      }
+
+      RingIterator operator+(typename Ring::difference_type offset)
+      {
+        RingIterator ret = *this;
+        for(typename Ring::difference_type i{}; i < offset; ++i)
+          ++ret;
+        return ret;
+      }
+
+      typename Ring::reference operator*()
+      {
+        return m_ring->at(m_pos);
+      }
+
+      bool operator==(RingIterator const &other)
+      {
+        return ((m_ring == other.m_ring) && (m_pos == other.m_pos));
+      }
+
+      bool operator!=(RingIterator const &other)
+      {
+        return ((m_ring != other.m_ring) || (m_pos != other.m_pos));
+      }
+
+      bool IsValid() const
+      {
+        return (m_pos != m_ring->size());
+      }
+
+    private:
+      Ring *m_ring;
+      typename Ring::size_type m_pos;
+    };
+
     struct Producer
     {
-      typename Ring::size_type pos;
-      bool isFirst;
+      RingIterator curr; ///< points to the most recently produced buffer, initialized to invalid
+      RingIterator next; ///< points to the in-production buffer, initialized to invalid
       bool isClosed;
 
-      Producer()
-        : pos(0U)
-        , isFirst(true)
+      Producer(Ring *ring)
+        : curr(ring)
+        , next(ring)
         , isClosed(false)
       {}
     };
 
     struct Consumer
     {
-      typename Ring::size_type pos;
-      bool isFirst;
+      RingIterator pos;
       bool isFull;
-      bool isEmpty;
       std::unique_ptr<Buffer> buffer;
       std::unique_ptr<std::promise<Buffer const &>> promise;
 
-      Consumer(typename Ring::size_type first)
-        : pos(first)
-        , isFirst(true)
+      Consumer(Ring *ring)
+        : pos(ring)
         , isFull(false)
-        , isEmpty(true)
         , buffer(new Buffer)
       {}
 
       Consumer(Consumer &&other)
         : pos(other.pos)
-        , isFirst(other.isFirst)
         , isFull(other.isFull)
-        , isEmpty(other.isEmpty)
         , buffer(std::move(other.buffer))
         , promise(std::move(other.promise))
       {}
@@ -64,10 +113,11 @@ namespace detail
     std::mutex mtx;
 
     SwitchBufferImpl(size_t count)
+      : ring(count)
+      , producer(&ring)
     {
-      ring.reserve(count);
-      for (size_t i = 0; i < count; ++i)
-        ring.emplace_back(new Buffer);
+      for (auto &&slot : ring)
+        slot.reset(new Buffer);
     }
 
     ~SwitchBufferImpl()
@@ -80,7 +130,7 @@ namespace detail
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      (void)consumers.emplace(std::make_pair(iface, Consumer(producer.pos)));
+      (void)consumers.emplace(std::make_pair(iface, Consumer(&ring)));
     }
 
     void CloseProducer()
@@ -107,85 +157,66 @@ namespace detail
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      if (producer.isFirst) {
-        producer.isFirst = false;
-      } else {
-        IncrementProducer();
+      // advance ring iterators
+      producer.curr = producer.next;
+      ++producer.next;
 
-        // if there are open promises, fulfill them
+      // save buffers that are currently consumed
+      for (auto &&p : consumers) {
+        auto &&consumer = p.second;
+
+        if (producer.next == consumer.pos) {
+          consumer.isFull = true;
+          std::swap(*producer.next, consumer.buffer);
+        }
+      }
+
+      if (producer.curr.IsValid()) {
         for (auto &&p : consumers) {
           auto &&consumer = p.second;
+
           if (consumer.promise) {
-            consumer.promise->set_value(*ring[consumer.pos]);
+            // fulfill open promise
+            consumer.pos = producer.curr;
+            consumer.promise->set_value(**consumer.pos);
             consumer.promise.reset();
           }
         }
       }
 
-      return *ring[producer.pos];
+      return **producer.next;
     }
 
-    std::future<Buffer const &> SwitchConsumer(SwitchBufferConsumer<Buffer> *iface)
+    std::future<Buffer const &> SwitchConsumer(SwitchBufferConsumer<Buffer> *iface, bool skipToMostRecent)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
       auto &&consumer = consumers.at(iface);
 
-      if (consumer.isFirst) {
-        consumer.isFirst = false;
-
-        // create a promise to fulfill on next Production
-        consumer.promise.reset(new std::promise<Buffer const &>());
-        return consumer.promise->get_future();
-      } else {
-        IncrementConsumer(consumer);
-
-        if (consumer.isEmpty) {
-          if (producer.isClosed) {
-            // create a promise to be broken immediately
-            return std::promise<Buffer const &>().get_future();
-          } else {
-            // create a promise to fulfill on next Production
-            consumer.promise.reset(new std::promise<Buffer const &>());
-            return consumer.promise->get_future();
-          }
+      if (producer.curr.IsValid() && (consumer.pos != producer.curr)) {
+        if (skipToMostRecent) {
+          consumer.isFull = false;
+          consumer.pos = producer.curr;
+        } else if (consumer.isFull) {
+          consumer.isFull = false;
+          consumer.pos = producer.next + 1;
         } else {
-          std::promise<Buffer const &> p;
-          p.set_value(*ring[consumer.pos]);
-          return p.get_future();
+          ++consumer.pos;
+        }
+
+        std::promise<Buffer const &> p;
+        p.set_value(**consumer.pos);
+        return p.get_future();
+      } else {
+        if (producer.isClosed) {
+          // create a promise to be broken immediately
+          return std::promise<Buffer const &>().get_future();
+        } else {
+          // create a promise to fulfill on next Production
+          consumer.promise.reset(new std::promise<Buffer const &>());
+          return consumer.promise->get_future();
         }
       }
-    }
-
-    void IncrementProducer()
-    {
-      Increment(producer.pos);
-
-      for (auto &&p : consumers) {
-        auto &&consumer = p.second;
-        if (consumer.pos == producer.pos) {
-          consumer.isFull = true;
-
-          std::swap(ring[producer.pos], consumer.buffer);
-        }
-      }
-    }
-
-    void IncrementConsumer(Consumer &consumer)
-    {
-      if (consumer.isFull) {
-        consumer.isFull = false;
-        consumer.pos = producer.pos;
-      }
-      Increment(consumer.pos);
-
-      consumer.isEmpty = (consumer.pos == producer.pos);
-    }
-
-    void Increment(typename Ring::size_type &pos)
-    {
-      ++pos;
-      pos %= ring.size();
     }
   };
 } // namespace detail
@@ -215,9 +246,9 @@ SwitchBufferConsumer<Buffer>::~SwitchBufferConsumer()
 }
 
 template<typename Buffer>
-std::future<Buffer const &> SwitchBufferConsumer<Buffer>::Switch()
+std::future<Buffer const &> SwitchBufferConsumer<Buffer>::Switch(bool skipToMostRecent)
 {
-  return m_impl->SwitchConsumer(this);
+  return m_impl->SwitchConsumer(this, skipToMostRecent);
 }
 
 template<typename Buffer>

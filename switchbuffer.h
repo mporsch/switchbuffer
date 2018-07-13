@@ -37,7 +37,7 @@ class SwitchBufferConsumer
 
 public:
   ~SwitchBufferConsumer();
-  std::future<Buffer const &> Switch();
+  std::future<Buffer const &> Switch(bool skipToMostRecent = false);
 
 private:
   SwitchBufferConsumer(std::shared_ptr<detail::SwitchBufferImpl<Buffer>> impl);
