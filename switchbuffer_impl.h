@@ -17,83 +17,28 @@ namespace detail
   {
     using Ring = std::vector<std::unique_ptr<Buffer>>;
 
-    class RingIterator
-    {
-    public:
-      RingIterator(Ring *ring)
-        : m_ring(ring)
-        , m_pos(ring->size())
-      {}
-
-      RingIterator &operator++()
-      {
-        ++m_pos;
-        m_pos %= m_ring->size();
-        return *this;
-      }
-
-      RingIterator operator++(int)
-      {
-        RingIterator ret = *this;
-        (void)++*this;
-        return ret;
-      }
-
-      RingIterator operator+(typename Ring::difference_type offset)
-      {
-        RingIterator ret = *this;
-        for(typename Ring::difference_type i{}; i < offset; ++i)
-          ++ret;
-        return ret;
-      }
-
-      typename Ring::reference operator*()
-      {
-        return m_ring->at(m_pos);
-      }
-
-      bool operator==(RingIterator const &other)
-      {
-        return ((m_ring == other.m_ring) && (m_pos == other.m_pos));
-      }
-
-      bool operator!=(RingIterator const &other)
-      {
-        return ((m_ring != other.m_ring) || (m_pos != other.m_pos));
-      }
-
-      bool IsValid() const
-      {
-        return (m_pos != m_ring->size());
-      }
-
-    private:
-      Ring *m_ring;
-      typename Ring::size_type m_pos;
-    };
-
     struct Producer
     {
-      RingIterator curr; ///< points to the most recently produced buffer, initialized to invalid
-      RingIterator next; ///< points to the in-production buffer, initialized to invalid
+      typename Ring::iterator curr; ///< points to the most recently produced buffer, initialized to invalid
+      typename Ring::iterator next; ///< points to the in-production buffer, initialized to invalid
       bool isClosed;
 
-      Producer(Ring *ring)
-        : curr(ring)
-        , next(ring)
+      Producer(Ring &ring)
+        : curr(std::end(ring))
+        , next(std::end(ring))
         , isClosed(false)
       {}
     };
 
     struct Consumer
     {
-      RingIterator pos;
+      typename Ring::iterator pos;
       bool isFull;
       std::unique_ptr<Buffer> buffer;
       std::unique_ptr<std::promise<Buffer const &>> promise;
 
-      Consumer(Ring *ring)
-        : pos(ring)
+      Consumer(Ring &ring)
+        : pos(std::end(ring))
         , isFull(false)
         , buffer(new Buffer)
       {}
@@ -114,7 +59,7 @@ namespace detail
 
     SwitchBufferImpl(size_t count)
       : ring(count)
-      , producer(&ring)
+      , producer(ring)
     {
       for (auto &&slot : ring)
         slot.reset(new Buffer);
@@ -130,7 +75,7 @@ namespace detail
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      (void)consumers.emplace(std::make_pair(iface, Consumer(&ring)));
+      (void)consumers.emplace(std::make_pair(iface, Consumer(ring)));
     }
 
     void CloseProducer()
@@ -159,7 +104,7 @@ namespace detail
 
       // advance ring iterators
       producer.curr = producer.next;
-      ++producer.next;
+      Wrap(++Wrap(producer.next));
 
       // save buffers that are currently consumed
       for (auto &&p : consumers) {
@@ -171,7 +116,7 @@ namespace detail
         }
       }
 
-      if (producer.curr.IsValid()) {
+      if (IsValid(producer.curr)) {
         for (auto &&p : consumers) {
           auto &&consumer = p.second;
 
@@ -193,15 +138,15 @@ namespace detail
 
       auto &&consumer = consumers.at(iface);
 
-      if (producer.curr.IsValid() && (consumer.pos != producer.curr)) {
+      if (IsValid(producer.curr) && (consumer.pos != producer.curr)) {
         if (skipToMostRecent) {
           consumer.isFull = false;
           consumer.pos = producer.curr;
         } else if (consumer.isFull) {
           consumer.isFull = false;
-          consumer.pos = producer.next + 1;
+          consumer.pos = Wrap(std::next(producer.next));
         } else {
-          ++consumer.pos;
+          Wrap(++Wrap(consumer.pos));
         }
 
         std::promise<Buffer const &> p;
@@ -217,6 +162,18 @@ namespace detail
           return consumer.promise->get_future();
         }
       }
+    }
+
+    bool IsValid(typename Ring::iterator const &it) const
+    {
+      return (it != std::end(ring));
+    }
+
+    typename Ring::iterator &Wrap(typename Ring::iterator &it)
+    {
+      if (!IsValid(it))
+        it = std::begin(ring);
+      return it;
     }
   };
 } // namespace detail
