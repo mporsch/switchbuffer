@@ -34,18 +34,21 @@ namespace detail
     {
       typename Ring::iterator pos;
       bool isFull;
+      bool isEmpty;
       std::unique_ptr<Buffer> buffer;
       std::unique_ptr<std::promise<Buffer const &>> promise;
 
       Consumer(Ring &ring)
         : pos(std::end(ring))
         , isFull(false)
+        , isEmpty(true)
         , buffer(new Buffer)
       {}
 
       Consumer(Consumer &&other)
         : pos(other.pos)
         , isFull(other.isFull)
+        , isEmpty(other.isEmpty)
         , buffer(std::move(other.buffer))
         , promise(std::move(other.promise))
       {}
@@ -120,11 +123,14 @@ namespace detail
         for (auto &&p : consumers) {
           auto &&consumer = p.second;
 
+          // fulfill open promise
           if (consumer.promise) {
-            // fulfill open promise
+            assert(consumer.isEmpty);
             consumer.pos = producer.curr;
             consumer.promise->set_value(**consumer.pos);
             consumer.promise.reset();
+          } else {
+            consumer.isEmpty = false;
           }
         }
       }
@@ -138,7 +144,7 @@ namespace detail
 
       auto &&consumer = consumers.at(iface);
 
-      if (IsValid(producer.curr) && (consumer.pos != producer.curr)) {
+      if (IsValid(producer.curr) && !consumer.isEmpty) {
         if (skipToMostRecent) {
           consumer.isFull = false;
           consumer.pos = producer.curr;
@@ -149,6 +155,9 @@ namespace detail
           Wrap(++Wrap(consumer.pos));
         }
 
+        consumer.isEmpty = (consumer.pos == producer.curr);
+
+        // return buffer immediately
         std::promise<Buffer const &> p;
         p.set_value(**consumer.pos);
         return p.get_future();
