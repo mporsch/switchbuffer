@@ -1,8 +1,8 @@
 #ifndef SWITCHBUFFER_H
 #define SWITCHBUFFER_H
 
-#include <memory>
 #include <future>
+#include <memory>
 
 namespace detail
 {

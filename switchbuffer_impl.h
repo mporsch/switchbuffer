@@ -46,6 +46,15 @@ namespace detail
         , isEmpty(true)
         , buffer(new Buffer)
       {}
+
+      Consumer(Consumer &&other)
+        : pos(other.pos)
+        , isFirst(other.isFirst)
+        , isFull(other.isFull)
+        , isEmpty(other.isEmpty)
+        , buffer(std::move(other.buffer))
+        , promise(std::move(other.promise))
+      {}
     };
     using ConsumerMap = std::map<SwitchBufferConsumer<Buffer> *, Consumer>;
 
