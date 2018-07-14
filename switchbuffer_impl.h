@@ -33,21 +33,6 @@ namespace detail
         return *this;
       }
 
-      RingIterator operator++(int)
-      {
-        RingIterator ret = *this;
-        (void)++*this;
-        return ret;
-      }
-
-      RingIterator operator+(typename Ring::difference_type offset)
-      {
-        RingIterator ret = *this;
-        for(typename Ring::difference_type i{}; i < offset; ++i)
-          ++ret;
-        return ret;
-      }
-
       typename Ring::reference operator*()
       {
         return m_ring->at(m_pos);
@@ -56,11 +41,6 @@ namespace detail
       bool operator==(RingIterator const &other) const
       {
         return ((m_ring == other.m_ring) && (m_pos == other.m_pos));
-      }
-
-      bool operator!=(RingIterator const &other) const
-      {
-        return ((m_ring != other.m_ring) || (m_pos != other.m_pos));
       }
 
       operator bool() const
