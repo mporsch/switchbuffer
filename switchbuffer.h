@@ -51,7 +51,6 @@ private:
 
 private:
   std::shared_ptr<detail::SwitchBufferImpl<Buffer>> m_impl;
-  size_t m_id;
 };
 
 /// SwitchBuffer master interface to distribute Producer and Consumer interfaces
