@@ -35,7 +35,8 @@ namespace detail
 
       typename Ring::reference operator*()
       {
-        return m_ring->at(m_pos);
+        assert(*this);
+        return (*m_ring)[m_pos];
       }
 
       bool operator==(RingIterator const &other) const
@@ -45,7 +46,7 @@ namespace detail
 
       operator bool() const
       {
-        return (m_pos != m_ring->size());
+        return (m_pos < m_ring->size());
       }
 
     private:
