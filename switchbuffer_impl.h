@@ -122,8 +122,8 @@ namespace detail
     Consumers consumers;
     std::mutex mtx;
 
-    SwitchBufferImpl(size_t count)
-      : ring(count)
+    SwitchBufferImpl(size_t ringBufferSize)
+      : ring(ringBufferSize)
       , producer(&ring)
     {
       for (auto &&slot : ring)
@@ -275,8 +275,8 @@ SwitchBufferConsumer<Buffer>::SwitchBufferConsumer(std::shared_ptr<detail::Switc
 
 
 template<typename Buffer>
-SwitchBuffer<Buffer>::SwitchBuffer(size_t count)
-  : m_impl(std::shared_ptr<detail::SwitchBufferImpl<Buffer>>(new detail::SwitchBufferImpl<Buffer>(count)))
+SwitchBuffer<Buffer>::SwitchBuffer(size_t ringBufferSize)
+  : m_impl(new detail::SwitchBufferImpl<Buffer>(ringBufferSize))
   , m_producer(new SwitchBufferProducer<Buffer>(m_impl))
 {}
 
