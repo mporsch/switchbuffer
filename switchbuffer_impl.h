@@ -41,7 +41,8 @@ namespace detail
 
       bool operator==(RingIterator const &other) const
       {
-        return ((m_ring == other.m_ring) && (m_pos == other.m_pos));
+        assert(m_ring == other.m_ring);
+        return (m_pos == other.m_pos);
       }
 
       operator bool() const
@@ -126,6 +127,9 @@ namespace detail
       : ring(ringBufferSize)
       , producer(&ring)
     {
+      if (ringBufferSize == 0U)
+        throw std::logic_error("SwitchBuffer: ring buffer size must not be null");
+
       for (auto &&slot : ring)
         slot.reset(new Buffer);
     }
@@ -170,18 +174,19 @@ namespace detail
       producer.curr = producer.next;
       ++producer.next;
 
-      // save buffers that are currently consumed
-      for (auto &&consumer : consumers) {
-        if (producer.next == consumer.pos) {
-          consumer.isFull = true;
-          std::swap(*producer.next, consumer.sanctuary);
-        }
-      }
-
       // notify Consumers if something has been produced yet
       // (the first call only provides the first buffer to the Producer)
       if (producer.curr) {
         for (auto &&consumer : consumers) {
+          if (producer.next == consumer.pos) {
+            // save buffer that is currently consumed
+            std::swap(*producer.next, consumer.sanctuary);
+
+            consumer.isFull = true;
+          } else {
+            consumer.isFull = false;
+          }
+
           if (consumer.promise) {
             assert(consumer.isEmpty);
             consumer.pos = producer.curr;
@@ -189,9 +194,11 @@ namespace detail
             // fulfill open promise
             consumer.promise->set_value(**consumer.pos);
             consumer.promise.reset();
-          } else {
-            consumer.isEmpty = false;
+          } else if (consumer.pos) {
+            consumer.isEmpty = (consumer.pos == producer.curr);
           }
+          assert(!(consumer.isEmpty && consumer.isFull) || (ring.size() == 1U));
+          assert(consumer.isEmpty || (ring.size() > 1U));
         }
       }
 
@@ -219,8 +226,10 @@ namespace detail
           ++consumer.pos;
         }
         consumer.isEmpty = (consumer.pos == producer.curr);
+        assert(!consumer.isFull);
 
         // return buffer immediately
+        assert(ring.size() > 1U);
         std::promise<Buffer const &> p;
         p.set_value(**consumer.pos);
         return p.get_future();
