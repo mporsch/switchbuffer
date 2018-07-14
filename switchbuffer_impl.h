@@ -56,9 +56,9 @@ namespace detail
 
     struct Producer
     {
-      RingIterator curr; ///< points to the most recently produced buffer, initialized to invalid
-      RingIterator next; ///< points to the in-production buffer, initialized to invalid
-      bool isClosed;
+      RingIterator curr; // points to the most recently produced buffer, initialized to invalid
+      RingIterator next; // points to the in-production buffer, initialized to invalid
+      bool isClosed; // flag whether producer has shut down
 
       Producer(Ring *ring)
         : curr(ring)
@@ -69,19 +69,19 @@ namespace detail
 
     struct Consumer
     {
-      SwitchBufferConsumer<Buffer> *parent;
-      RingIterator pos;
-      bool isFull;
-      bool isEmpty;
-      std::unique_ptr<Buffer> buffer;
-      std::unique_ptr<std::promise<Buffer const &>> promise;
+      SwitchBufferConsumer<Buffer> *parent; // parent address used as ID
+      RingIterator pos; // points to the in-consumption buffer, initialized to invalid
+      bool isFull; // flag whether ring is full of consumable slots
+      bool isEmpty; // flag whether ring is empty of consumable slots
+      std::unique_ptr<Buffer> sanctuary; // storage to save in-consumption buffer before being overwritten
+      std::unique_ptr<std::promise<Buffer const &>> promise; // promise to fulfill after empty ring
 
       Consumer(SwitchBufferConsumer<Buffer> *parent, Ring *ring)
         : parent(parent)
         , pos(ring)
         , isFull(false)
         , isEmpty(true)
-        , buffer(new Buffer)
+        , sanctuary(new Buffer)
       {}
 
       Consumer(Consumer &&other)
@@ -89,7 +89,7 @@ namespace detail
         , pos(other.pos)
         , isFull(other.isFull)
         , isEmpty(other.isEmpty)
-        , buffer(std::move(other.buffer))
+        , sanctuary(std::move(other.sanctuary))
         , promise(std::move(other.promise))
       {}
 
@@ -99,7 +99,7 @@ namespace detail
         pos = other.pos;
         isFull = other.isFull;
         isEmpty = other.isEmpty;
-        buffer = std::move(other.buffer);
+        sanctuary = std::move(other.sanctuary);
         promise = std::move(other.promise);
         return *this;
       }
@@ -132,7 +132,6 @@ namespace detail
 
     ~SwitchBufferImpl()
     {
-      // the consumers must have been destroyed beforehand
       assert(consumers.empty());
     }
 
@@ -175,16 +174,19 @@ namespace detail
       for (auto &&consumer : consumers) {
         if (producer.next == consumer.pos) {
           consumer.isFull = true;
-          std::swap(*producer.next, consumer.buffer);
+          std::swap(*producer.next, consumer.sanctuary);
         }
       }
 
+      // notify Consumers if something has been produced yet
+      // (the first call only provides the first buffer to the Producer)
       if (producer.curr) {
         for (auto &&consumer : consumers) {
-          // fulfill open promise
           if (consumer.promise) {
             assert(consumer.isEmpty);
             consumer.pos = producer.curr;
+
+            // fulfill open promise
             consumer.promise->set_value(**consumer.pos);
             consumer.promise.reset();
           } else {
@@ -200,11 +202,13 @@ namespace detail
     {
       std::lock_guard<std::mutex> lock(mtx);
 
+      // determine consumer storage
       auto const it = consumers.find(parent);
       assert(it != std::end(consumers));
       auto &&consumer = *it;
 
       if (producer.curr && !consumer.isEmpty) {
+        // advance ring iterator
         if (skipToMostRecent) {
           consumer.isFull = false;
           consumer.pos = producer.curr;
@@ -214,7 +218,6 @@ namespace detail
         } else {
           ++consumer.pos;
         }
-
         consumer.isEmpty = (consumer.pos == producer.curr);
 
         // return buffer immediately
