@@ -5,9 +5,9 @@
 # error Include this file via switchbuffer.h only
 #endif
 
+#include <algorithm>
 #include <cassert>
 #include <iterator>
-#include <map>
 #include <mutex>
 #include <vector>
 
@@ -69,32 +69,57 @@ namespace detail
 
     struct Consumer
     {
+      size_t id;
       RingIterator pos;
       bool isFull;
       bool isEmpty;
       std::unique_ptr<Buffer> buffer;
       std::unique_ptr<std::promise<Buffer const &>> promise;
 
-      Consumer(Ring *ring)
-        : pos(ring)
+      Consumer(size_t id, Ring *ring)
+        : id(id)
+        , pos(ring)
         , isFull(false)
         , isEmpty(true)
         , buffer(new Buffer)
       {}
 
       Consumer(Consumer &&other)
-        : pos(other.pos)
+        : id(other.id)
+        , pos(other.pos)
         , isFull(other.isFull)
         , isEmpty(other.isEmpty)
         , buffer(std::move(other.buffer))
         , promise(std::move(other.promise))
       {}
+
+      Consumer &operator=(Consumer &&other)
+      {
+        id = other.id;
+        pos = other.pos;
+        isFull = other.isFull;
+        isEmpty = other.isEmpty;
+        buffer = std::move(other.buffer);
+        promise = std::move(other.promise);
+        return *this;
+      }
     };
-    using ConsumerMap = std::map<SwitchBufferConsumer<Buffer> *, Consumer>;
+
+    struct Consumers : public std::vector<Consumer>
+    {
+      typename std::vector<Consumer>::iterator find(size_t id)
+      {
+        return std::find_if(this->begin(), this->end(),
+          [&](Consumer const &consumer) -> bool
+          {
+            return (id == consumer.id);
+          });
+      }
+    };
 
     Ring ring;
     Producer producer;
-    ConsumerMap consumers;
+    Consumers consumers;
     std::mutex mtx;
 
     SwitchBufferImpl(size_t count)
@@ -111,11 +136,13 @@ namespace detail
       assert(consumers.empty());
     }
 
-    void CreateConsumer(SwitchBufferConsumer<Buffer> *iface)
+    size_t CreateConsumer()
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      (void)consumers.emplace(std::make_pair(iface, Consumer(&ring)));
+      size_t const id = (consumers.empty() ? 0U : consumers.back().id + 1U);
+      consumers.emplace_back(Consumer(id, &ring));
+      return id;
     }
 
     void CloseProducer()
@@ -126,15 +153,15 @@ namespace detail
 
       // if there are open promises, break them
       for (auto &&consumer : consumers)
-        consumer.second.promise.reset();
+        consumer.promise.reset();
     }
 
-    void CloseConsumer(SwitchBufferConsumer<Buffer> *iface)
+    void CloseConsumer(size_t id)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      auto it = consumers.find(iface);
-      assert(it != end(consumers));
+      auto const it = consumers.find(id);
+      assert(it != std::end(consumers));
       (void)consumers.erase(it);
     }
 
@@ -147,9 +174,7 @@ namespace detail
       ++producer.next;
 
       // save buffers that are currently consumed
-      for (auto &&p : consumers) {
-        auto &&consumer = p.second;
-
+      for (auto &&consumer : consumers) {
         if (producer.next == consumer.pos) {
           consumer.isFull = true;
           std::swap(*producer.next, consumer.buffer);
@@ -157,9 +182,7 @@ namespace detail
       }
 
       if (producer.curr) {
-        for (auto &&p : consumers) {
-          auto &&consumer = p.second;
-
+        for (auto &&consumer : consumers) {
           // fulfill open promise
           if (consumer.promise) {
             assert(consumer.isEmpty);
@@ -175,11 +198,13 @@ namespace detail
       return **producer.next;
     }
 
-    std::future<Buffer const &> SwitchConsumer(SwitchBufferConsumer<Buffer> *iface, bool skipToMostRecent)
+    std::future<Buffer const &> SwitchConsumer(size_t id, bool skipToMostRecent)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      auto &&consumer = consumers.at(iface);
+      auto const it = consumers.find(id);
+      assert(it != std::end(consumers));
+      auto &&consumer = *it;
 
       if (producer.curr && !consumer.isEmpty) {
         if (skipToMostRecent) {
@@ -233,18 +258,19 @@ SwitchBufferProducer<Buffer>::SwitchBufferProducer(std::shared_ptr<detail::Switc
 template<typename Buffer>
 SwitchBufferConsumer<Buffer>::~SwitchBufferConsumer()
 {
-  m_impl->CloseConsumer(this);
+  m_impl->CloseConsumer(m_id);
 }
 
 template<typename Buffer>
 std::future<Buffer const &> SwitchBufferConsumer<Buffer>::Switch(bool skipToMostRecent)
 {
-  return m_impl->SwitchConsumer(this, skipToMostRecent);
+  return m_impl->SwitchConsumer(m_id, skipToMostRecent);
 }
 
 template<typename Buffer>
 SwitchBufferConsumer<Buffer>::SwitchBufferConsumer(std::shared_ptr<detail::SwitchBufferImpl<Buffer>> impl)
   : m_impl(std::move(impl))
+  , m_id(m_impl->CreateConsumer())
 {}
 
 
@@ -270,9 +296,7 @@ std::unique_ptr<SwitchBufferProducer<Buffer>> SwitchBuffer<Buffer>::GetProducer(
 template<typename Buffer>
 std::unique_ptr<SwitchBufferConsumer<Buffer>> SwitchBuffer<Buffer>::GetConsumer()
 {
-  auto ret = std::unique_ptr<SwitchBufferConsumer<Buffer>>(new SwitchBufferConsumer<Buffer>(m_impl));
-  m_impl->CreateConsumer(ret.get());
-  return ret;
+  return std::unique_ptr<SwitchBufferConsumer<Buffer>>(new SwitchBufferConsumer<Buffer>(m_impl));
 }
 
 #endif // SWITCHBUFFER_IMPL_H

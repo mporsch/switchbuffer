@@ -5,6 +5,7 @@
 #include <csignal>         // for signal
 #include <iomanip>         // for std::setfill
 #include <iostream>        // for std::cout
+#include <map>             // for std::map
 #include <random>          // for std::uniform_int_distribution
 #include <thread>          // for std::thread
 
