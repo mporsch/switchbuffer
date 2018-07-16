@@ -13,6 +13,16 @@
 
 namespace detail
 {
+  template<typename T>
+  void BreakPromise(std::promise<T> &promise)
+  {
+#if defined(_MSC_VER) && (_MSC_VER < 1900)
+    promise.set_exception(std::make_exception_ptr(std::future_error(std::future_errc::broken_promise)));
+#else
+    (void)promise;
+#endif
+  }
+
   template<typename Buffer>
   struct SwitchBufferImpl
   {
@@ -94,6 +104,12 @@ namespace detail
         , promise(std::move(other.promise))
       {}
 
+      ~Consumer()
+      {
+        if (promise)
+          BreakPromise(*promise);
+      }
+
       Consumer &operator=(Consumer &&other)
       {
         parent = other.parent;
@@ -153,8 +169,12 @@ namespace detail
       producer.isClosed = true;
 
       // if there are open promises, break them
-      for (auto &&consumer : consumers)
-        consumer.promise.reset();
+      for(auto &&consumer : consumers) {
+        if (consumer.promise) {
+          BreakPromise(*consumer.promise);
+          consumer.promise.reset();
+        }
+      }
     }
 
     void CloseConsumer(SwitchBufferConsumer<Buffer> *parent)
@@ -231,7 +251,9 @@ namespace detail
       } else {
         if (producer.isClosed) {
           // create a promise to be broken immediately
-          return std::promise<Buffer const &>().get_future();
+          std::promise<Buffer const &> p;
+          BreakPromise(p);
+          return p.get_future();
         } else {
           // create a promise to fulfill on next Production
           consumer.promise.reset(new std::promise<Buffer const &>());
