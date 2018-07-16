@@ -127,8 +127,8 @@ namespace detail
       : ring(ringBufferSize)
       , producer(&ring)
     {
-      if (ringBufferSize == 0U)
-        throw std::logic_error("SwitchBuffer: ring buffer size must not be null");
+      if (ringBufferSize <= 1U)
+        throw std::logic_error("SwitchBuffer: ring buffer size must be larger than 1");
 
       for (auto &&slot : ring)
         slot.reset(new Buffer);
@@ -178,17 +178,6 @@ namespace detail
       // (the first call only provides the first buffer to the Producer)
       if (producer.curr) {
         for (auto &&consumer : consumers) {
-          if (producer.next == consumer.pos) {
-            // save buffer that is currently consumed
-            std::swap(*producer.next, consumer.sanctuary);
-
-            consumer.isFull = true;
-          } else if (consumer.isFull) {
-            consumer.pos = producer.next;
-          } else {
-            consumer.isFull = false;
-          }
-
           if (consumer.promise) {
             assert(consumer.isEmpty);
             consumer.pos = producer.curr;
@@ -196,11 +185,18 @@ namespace detail
             // fulfill open promise
             consumer.promise->set_value(**consumer.pos);
             consumer.promise.reset();
-          } else if (consumer.pos) {
-            consumer.isEmpty = (consumer.pos == producer.curr);
+          } else {
+            consumer.isEmpty = false;
+
+            if (producer.next == consumer.pos) {
+              // save buffer that is currently consumed
+              std::swap(*producer.next, consumer.sanctuary);
+
+              consumer.isFull = true;
+            } else if (consumer.isFull) {
+              consumer.pos = producer.next;
+            }
           }
-          assert(!(consumer.isEmpty && consumer.isFull) || (ring.size() == 1U));
-          assert(consumer.isEmpty || (ring.size() > 1U));
         }
       }
 
@@ -216,7 +212,8 @@ namespace detail
       assert(it != std::end(consumers));
       auto &&consumer = *it;
 
-      if (producer.curr && !consumer.isEmpty) {
+      // buffer immediately ready if something has been produced yet and ring is non-empty (except for first call)
+      if (producer.curr && (!consumer.isEmpty || !consumer.pos)) {
         // advance ring iterator
         if (skipToMostRecent) {
           consumer.pos = producer.curr;
@@ -228,7 +225,6 @@ namespace detail
         consumer.isFull = false;
 
         // return buffer immediately
-        assert(ring.size() > 1U);
         std::promise<Buffer const &> p;
         p.set_value(**consumer.pos);
         return p.get_future();
