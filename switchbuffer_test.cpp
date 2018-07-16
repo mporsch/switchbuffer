@@ -9,6 +9,11 @@
 #include <random>          // for std::uniform_int_distribution
 #include <thread>          // for std::thread
 
+#ifdef _WIN32
+  #define WIN32_LEAN_AND_MEAN
+  #include <windows.h>     // for SetConsoleCursorPosition
+#endif
+
 #define CONSUMER_COUNT 3
 #define PRINT_LINES 30
 
@@ -38,8 +43,21 @@ void SignalHandler(int)
 
 void ClearTerminal()
 {
+#ifdef _WIN32
+  HANDLE const console = GetStdHandle(STD_OUTPUT_HANDLE);
+  COORD const writeCoord{0, 0};
+  CONSOLE_SCREEN_BUFFER_INFO s;
+  (void)GetConsoleScreenBufferInfo(console, &s);
+  DWORD const length = s.dwSize.X * s.dwSize.Y;
+
+  DWORD written;
+  (void)FillConsoleOutputCharacter(console, ' ', length, writeCoord, &written);
+  (void)FillConsoleOutputAttribute(console, s.wAttributes, length, writeCoord, &written);
+  (void)SetConsoleCursorPosition(console, writeCoord);
+#else
   // CSI[2J clears screen, CSI[H moves the cursor to top-left corner
   cout << "\x1B[2J\x1B[H";
+#endif
 }
 
 void PrintStatus()
