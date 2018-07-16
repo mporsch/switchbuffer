@@ -183,6 +183,8 @@ namespace detail
             std::swap(*producer.next, consumer.sanctuary);
 
             consumer.isFull = true;
+          } else if (consumer.isFull) {
+            consumer.pos = producer.next;
           } else {
             consumer.isFull = false;
           }
@@ -217,16 +219,13 @@ namespace detail
       if (producer.curr && !consumer.isEmpty) {
         // advance ring iterator
         if (skipToMostRecent) {
-          consumer.isFull = false;
           consumer.pos = producer.curr;
-        } else if (consumer.isFull) {
-          consumer.isFull = false;
-          consumer.pos = std::next(producer.next);
+          consumer.isEmpty = true;
         } else {
           ++consumer.pos;
+          consumer.isEmpty = (consumer.pos == producer.curr);
         }
-        consumer.isEmpty = (consumer.pos == producer.curr);
-        assert(!consumer.isFull);
+        consumer.isFull = false;
 
         // return buffer immediately
         assert(ring.size() > 1U);
