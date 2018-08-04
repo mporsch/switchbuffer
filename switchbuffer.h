@@ -58,18 +58,22 @@ template<typename Buffer>
 class SwitchBuffer
 {
 public:
+  using Producer = typename std::unique_ptr<SwitchBufferProducer<Buffer>>;
+  using Consumer = typename std::unique_ptr<SwitchBufferConsumer<Buffer>>;
+
+public:
   SwitchBuffer(size_t ringBufferSize);
   ~SwitchBuffer();
 
   /// get an interface to pass to the Producer
-  std::unique_ptr<SwitchBufferProducer<Buffer>> GetProducer();
+  Producer GetProducer();
 
   /// get an interface to pass to a Consumer
-  std::unique_ptr<SwitchBufferConsumer<Buffer>> GetConsumer();
+  Consumer GetConsumer();
 
 private:
   std::shared_ptr<detail::SwitchBufferImpl<Buffer>> m_impl;
-  std::unique_ptr<SwitchBufferProducer<Buffer>> m_producer;
+  Producer m_producer;
 };
 
 #include "switchbuffer_impl.h"

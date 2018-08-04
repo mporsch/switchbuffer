@@ -18,7 +18,8 @@
 #define PRINT_LINES 30
 
 using namespace std;
-using Buffer = unsigned int;
+using BufferContent = unsigned int;
+using Buffer = SwitchBuffer<BufferContent>;
 struct Status : public std::array<char, CONSUMER_COUNT>
 {
   Status()
@@ -28,7 +29,7 @@ struct Status : public std::array<char, CONSUMER_COUNT>
 };
 
 mutex printMutex;                                     ///< Mutex to unmangle cout output
-map<Buffer, Status> statusMap;                        ///< Status of Produce-Consume
+map<BufferContent, Status> statusMap;                 ///< Status of Produce-Consume
 atomic<bool> shouldStop(false);                       ///< Thread watch variable
 default_random_engine generator;                      ///< Random generator
 uniform_int_distribution<int> distribution(1, 1000);  ///< Random distribution
@@ -72,14 +73,14 @@ void PrintStatus()
 }
 
 /// Producer thread
-void Producer(unique_ptr<SwitchBufferProducer<Buffer>> sbuf)
+void Producer(Buffer::Producer sbuf)
 {
-  Buffer i{};
+  BufferContent i{};
 
   while (!shouldStop)
   {
     // get a buffer to write to
-    Buffer &buf = sbuf->Switch();
+    BufferContent &buf = sbuf->Switch();
 
     // produce something
     buf = i++;
@@ -100,19 +101,19 @@ void Producer(unique_ptr<SwitchBufferProducer<Buffer>> sbuf)
 }
 
 /// Consumer thread
-void Consumer(size_t threadId, unique_ptr<SwitchBufferConsumer<Buffer>> sbuf)
+void Consumer(size_t threadId, Buffer::Consumer sbuf)
 try
 {
   while (true)
   {
-    // get a future for the next Buffer
-    future<Buffer const &> future = sbuf->Switch();
+    // get a future for the next buffer
+    future<BufferContent const &> future = sbuf->Switch();
 
-    // check if Buffer is available immediately
+    // check if buffer is available immediately
     bool wasDelayed = (future.wait_for(chrono::seconds(0)) == future_status::timeout);
 
-    // wait for the Buffer to become available
-    Buffer const &buf = future.get();
+    // wait for the buffer to become available
+    BufferContent const &buf = future.get();
 
     { // print
       lock_guard<mutex> lock(printMutex);
@@ -144,7 +145,7 @@ int main(int, char **)
   thread consumers[CONSUMER_COUNT];
   {
     // create SwitchBuffer. Will be released by Producer and Consumers
-    SwitchBuffer<Buffer> sbuf(5);
+    Buffer sbuf(5);
 
     producer = thread(Producer, sbuf.GetProducer());
     for (size_t i = 0; i < extent<decltype(consumers)>::value; ++i)

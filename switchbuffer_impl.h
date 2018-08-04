@@ -319,7 +319,7 @@ SwitchBuffer<Buffer>::~SwitchBuffer()
 {}
 
 template<typename Buffer>
-std::unique_ptr<SwitchBufferProducer<Buffer>> SwitchBuffer<Buffer>::GetProducer()
+typename SwitchBuffer<Buffer>::Producer SwitchBuffer<Buffer>::GetProducer()
 {
   if (!m_producer)
     throw std::logic_error("SwitchBuffer: only one producer supported");
@@ -328,9 +328,9 @@ std::unique_ptr<SwitchBufferProducer<Buffer>> SwitchBuffer<Buffer>::GetProducer(
 }
 
 template<typename Buffer>
-std::unique_ptr<SwitchBufferConsumer<Buffer>> SwitchBuffer<Buffer>::GetConsumer()
+typename SwitchBuffer<Buffer>::Consumer SwitchBuffer<Buffer>::GetConsumer()
 {
-  return std::unique_ptr<SwitchBufferConsumer<Buffer>>(new SwitchBufferConsumer<Buffer>(m_impl));
+  return Consumer(new SwitchBufferConsumer<Buffer>(m_impl));
 }
 
 #endif // SWITCHBUFFER_IMPL_H
