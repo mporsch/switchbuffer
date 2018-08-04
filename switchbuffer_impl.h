@@ -17,7 +17,8 @@ namespace detail
   void BreakPromise(std::promise<T> &promise)
   {
 #if defined(_MSC_VER) && (_MSC_VER < 1900)
-    promise.set_exception(std::make_exception_ptr(std::future_error(std::future_errc::broken_promise)));
+    promise.set_exception(std::make_exception_ptr(
+      std::future_error(std::future_errc::broken_promise)));
 #else
     (void)promise;
 #endif
@@ -28,7 +29,8 @@ namespace detail
   {
     using Ring = std::vector<std::unique_ptr<Buffer>>;
 
-    class RingIterator : public std::iterator<std::input_iterator_tag, typename Ring::value_type>
+    class RingIterator
+      : public std::iterator<std::input_iterator_tag, typename Ring::value_type>
     {
     public:
       RingIterator(Ring *ring)
@@ -80,14 +82,14 @@ namespace detail
 
     struct Consumer
     {
-      SwitchBufferConsumer<Buffer> *parent; // parent address used as ID
+      SwitchBufferConsumer<Buffer> const *parent; // parent address used as ID
       RingIterator pos; // points to the in-consumption buffer, initialized to invalid
       bool isFull; // flag whether ring is full of consumable slots
       bool isEmpty; // flag whether ring is empty of consumable slots
       std::unique_ptr<Buffer> sanctuary; // storage to save in-consumption buffer before being overwritten
       std::unique_ptr<std::promise<Buffer const &>> promise; // promise to fulfill after empty ring
 
-      Consumer(SwitchBufferConsumer<Buffer> *parent, Ring *ring)
+      Consumer(SwitchBufferConsumer<Buffer> const *parent, Ring *ring)
         : parent(parent)
         , pos(ring)
         , isFull(false)
@@ -124,7 +126,8 @@ namespace detail
 
     struct Consumers : public std::vector<Consumer>
     {
-      typename std::vector<Consumer>::iterator find(SwitchBufferConsumer<Buffer> *parent)
+      typename std::vector<Consumer>::iterator find(
+        SwitchBufferConsumer<Buffer> const *parent)
       {
         return std::find_if(this->begin(), this->end(),
           [&](Consumer const &consumer) -> bool
@@ -155,7 +158,7 @@ namespace detail
       assert(consumers.empty());
     }
 
-    void CreateConsumer(SwitchBufferConsumer<Buffer> *parent)
+    void CreateConsumer(SwitchBufferConsumer<Buffer> const *parent)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
@@ -177,7 +180,7 @@ namespace detail
       }
     }
 
-    void CloseConsumer(SwitchBufferConsumer<Buffer> *parent)
+    void CloseConsumer(SwitchBufferConsumer<Buffer> const *parent)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
@@ -223,7 +226,8 @@ namespace detail
       return **producer.next;
     }
 
-    std::future<Buffer const &> SwitchConsumer(SwitchBufferConsumer<Buffer> *parent, bool skipToMostRecent)
+    std::future<Buffer const &> SwitchConsumer(
+      SwitchBufferConsumer<Buffer> const *parent, bool skipToMostRecent)
     {
       std::lock_guard<std::mutex> lock(mtx);
 
@@ -277,7 +281,8 @@ Buffer &SwitchBufferProducer<Buffer>::Switch()
 }
 
 template<typename Buffer>
-SwitchBufferProducer<Buffer>::SwitchBufferProducer(std::shared_ptr<detail::SwitchBufferImpl<Buffer>> impl)
+SwitchBufferProducer<Buffer>::SwitchBufferProducer(
+  std::shared_ptr<detail::SwitchBufferImpl<Buffer>> impl)
   : m_impl(std::move(impl))
 {}
 
@@ -295,7 +300,8 @@ std::future<Buffer const &> SwitchBufferConsumer<Buffer>::Switch(bool skipToMost
 }
 
 template<typename Buffer>
-SwitchBufferConsumer<Buffer>::SwitchBufferConsumer(std::shared_ptr<detail::SwitchBufferImpl<Buffer>> impl)
+SwitchBufferConsumer<Buffer>::SwitchBufferConsumer(
+  std::shared_ptr<detail::SwitchBufferImpl<Buffer>> impl)
   : m_impl(std::move(impl))
 {
   m_impl->CreateConsumer(this);
