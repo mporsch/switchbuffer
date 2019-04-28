@@ -20,7 +20,12 @@ class SwitchBufferProducer
   friend class SwitchBuffer<Buffer>;
 
 public:
+  SwitchBufferProducer(SwitchBufferProducer const &) = delete;
+  SwitchBufferProducer(SwitchBufferProducer &&other) noexcept;
   ~SwitchBufferProducer();
+
+  SwitchBufferProducer &operator=(SwitchBufferProducer const &) = delete;
+  SwitchBufferProducer &operator=(SwitchBufferProducer &&other) noexcept;
 
   /// get a buffer to produce into
   Buffer &Switch();
@@ -40,7 +45,12 @@ class SwitchBufferConsumer
   friend class SwitchBuffer<Buffer>;
 
 public:
+  SwitchBufferConsumer(SwitchBufferConsumer const &) = delete;
+  SwitchBufferConsumer(SwitchBufferConsumer &&other) noexcept;
   ~SwitchBufferConsumer();
+
+  SwitchBufferConsumer &operator=(SwitchBufferConsumer const &) = delete;
+  SwitchBufferConsumer &operator=(SwitchBufferConsumer &&other) noexcept;
 
   /// get a buffer to consume from
   std::future<Buffer const &> Switch(bool skipToMostRecent = false);
@@ -63,7 +73,12 @@ public:
 
 public:
   SwitchBuffer(size_t ringBufferSize);
+  SwitchBuffer(SwitchBuffer const &) = delete;
+  SwitchBuffer(SwitchBuffer &&other) noexcept;
   ~SwitchBuffer();
+
+  SwitchBuffer &operator=(SwitchBuffer const &) = delete;
+  SwitchBuffer &operator=(SwitchBuffer &&other) noexcept;
 
   /// get an interface to pass to the Producer
   Producer GetProducer();

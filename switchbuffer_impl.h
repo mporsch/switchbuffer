@@ -99,7 +99,9 @@ namespace detail
         , sanctuary(new Buffer)
       {}
 
-      Consumer(Consumer &&other)
+      Consumer(const Consumer &other) = delete;
+
+      Consumer(Consumer &&other) noexcept
         : parent(other.parent)
         , pos(other.pos)
         , isFull(other.isFull)
@@ -114,7 +116,9 @@ namespace detail
           BreakPromise(*promise);
       }
 
-      Consumer &operator=(Consumer &&other)
+      Consumer &operator=(const Consumer &other) = delete;
+
+      Consumer &operator=(Consumer &&other) noexcept
       {
         parent = other.parent;
         pos = other.pos;
@@ -149,10 +153,16 @@ namespace detail
         slot.reset(new Buffer);
     }
 
+    SwitchBufferImpl(const SwitchBufferImpl &) = delete;
+    SwitchBufferImpl(SwitchBufferImpl &&) = delete;
+
     ~SwitchBufferImpl()
     {
       assert(consumers.empty());
     }
+
+    SwitchBufferImpl &operator=(const SwitchBufferImpl &) = delete;
+    SwitchBufferImpl &operator=(SwitchBufferImpl &&) = delete;
 
     void CreateConsumer(SwitchBufferConsumer<Buffer> const *parent)
     {
@@ -271,6 +281,19 @@ SwitchBufferProducer<Buffer>::~SwitchBufferProducer()
 }
 
 template<typename Buffer>
+SwitchBufferProducer<Buffer>::SwitchBufferProducer(SwitchBufferProducer<Buffer> &&other) noexcept
+  : m_impl(std::move(other.m_impl))
+{}
+
+template<typename Buffer>
+SwitchBufferProducer<Buffer> &
+SwitchBufferProducer<Buffer>::operator=(SwitchBufferProducer<Buffer> &&other) noexcept
+{
+  m_impl = std::move(other.m_impl);
+  return *this;
+}
+
+template<typename Buffer>
 Buffer &SwitchBufferProducer<Buffer>::Switch()
 {
   return m_impl->SwitchProducer();
@@ -287,6 +310,19 @@ template<typename Buffer>
 SwitchBufferConsumer<Buffer>::~SwitchBufferConsumer()
 {
   m_impl->CloseConsumer(this);
+}
+
+template<typename Buffer>
+SwitchBufferConsumer<Buffer>::SwitchBufferConsumer(SwitchBufferConsumer<Buffer> &&other) noexcept
+  : m_impl(std::move(other.m_impl))
+{}
+
+template<typename Buffer>
+SwitchBufferConsumer<Buffer> &
+SwitchBufferConsumer<Buffer>::operator=(SwitchBufferConsumer<Buffer> &&other) noexcept
+{
+  m_impl = std::move(other.m_impl);
+  return *this;
 }
 
 template<typename Buffer>
@@ -313,6 +349,19 @@ SwitchBuffer<Buffer>::SwitchBuffer(size_t ringBufferSize)
 template<typename Buffer>
 SwitchBuffer<Buffer>::~SwitchBuffer()
 {}
+
+template<typename Buffer>
+SwitchBuffer<Buffer>::SwitchBuffer(SwitchBuffer<Buffer> &&other) noexcept
+  : m_impl(std::move(other.m_impl))
+{}
+
+template<typename Buffer>
+SwitchBuffer<Buffer> &
+SwitchBuffer<Buffer>::operator=(SwitchBuffer<Buffer> &&other) noexcept
+{
+  m_impl = std::move(other.m_impl);
+  return *this;
+}
 
 template<typename Buffer>
 typename SwitchBuffer<Buffer>::Producer SwitchBuffer<Buffer>::GetProducer()
