@@ -17,6 +17,7 @@ namespace detail
   void BreakPromise(std::promise<T> &promise)
   {
 #if defined(_MSC_VER) && (_MSC_VER < 1900)
+    // workaround for MSVC2013 not breaking the promise when going out of scope unfulfilled
     promise.set_exception(std::make_exception_ptr(
       std::future_error(std::future_errc::broken_promise)));
 #else
@@ -35,7 +36,7 @@ namespace detail
     public:
       RingIterator(Ring *ring)
         : m_ring(ring)
-        , m_pos(ring->size())
+        , m_pos(ring->size()) // initialize with invalid position index
       {}
 
       RingIterator &operator++()
@@ -57,6 +58,7 @@ namespace detail
         return (m_pos == other.m_pos);
       }
 
+      // check for valid position index
       operator bool() const
       {
         return (m_pos < m_ring->size());
@@ -122,20 +124,14 @@ namespace detail
         promise = std::move(other.promise);
         return *this;
       }
-    };
 
-    struct Consumers : public std::vector<Consumer>
-    {
-      typename std::vector<Consumer>::iterator find(
-        SwitchBufferConsumer<Buffer> const *parent)
+      // for use with std::find
+      bool operator==(SwitchBufferConsumer<Buffer> const *otherParent) const
       {
-        return std::find_if(this->begin(), this->end(),
-          [&](Consumer const &consumer) -> bool
-          {
-            return (parent == consumer.parent);
-          });
+        return (parent == otherParent);
       }
     };
+    using Consumers = std::vector<Consumer>;
 
     Ring ring;
     Producer producer;
@@ -184,7 +180,7 @@ namespace detail
     {
       std::lock_guard<std::mutex> lock(mtx);
 
-      auto const it = consumers.find(parent);
+      auto const it = std::find(std::begin(consumers), std::end(consumers), parent);
       assert(it != std::end(consumers));
       (void)consumers.erase(it);
     }
@@ -232,7 +228,7 @@ namespace detail
       std::lock_guard<std::mutex> lock(mtx);
 
       // determine consumer storage
-      auto const it = consumers.find(parent);
+      auto const it = std::find(std::begin(consumers), std::end(consumers), parent);
       assert(it != std::end(consumers));
       auto &&consumer = *it;
 
