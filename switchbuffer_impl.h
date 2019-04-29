@@ -11,6 +11,41 @@
 #include <mutex>
 #include <vector>
 
+#if __cplusplus >= 201703L
+# include <optional>
+#else
+namespace std
+{
+  template<typename T>
+  struct optional
+  {
+    template<typename... Args>
+    T &emplace(Args&&... args)
+    {
+      m_ptr.reset(new T(std::forward<Args>(args)...));
+    }
+
+    void reset() noexcept
+    {
+      m_ptr.reset();
+    }
+
+    T *operator->()
+    {
+      return m_ptr.get();
+    }
+
+    operator bool() const noexcept
+    {
+      return !!m_ptr;
+    }
+
+  private:
+    std::unique_ptr<T> m_ptr;
+  };
+}
+#endif // __cplusplus >= 201703L
+
 namespace detail
 {
   template<typename Buffer>
@@ -77,7 +112,7 @@ namespace detail
       bool isFull; // flag whether ring is full of consumable slots
       bool isEmpty; // flag whether ring is empty of consumable slots
       std::unique_ptr<Buffer> sanctuary; // storage to save in-consumption buffer before being overwritten
-      std::unique_ptr<std::promise<Buffer const &>> promise; // promise to fulfill after empty ring
+      std::optional<std::promise<Buffer const &>> promise; // promise to fulfill after empty ring
 
       Consumer(SwitchBufferConsumer<Buffer> const *parent, Ring *ring)
         : parent(parent)
@@ -225,7 +260,7 @@ namespace detail
           return std::promise<Buffer const &>().get_future();
         } else {
           // create a promise to fulfill on next Production
-          consumer.promise.reset(new std::promise<Buffer const &>());
+          consumer.promise.emplace();
           return consumer.promise->get_future();
         }
       }
