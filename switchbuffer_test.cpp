@@ -23,16 +23,17 @@ using Buffer = SwitchBuffer<BufferContent>;
 struct Status : public std::array<char, CONSUMER_COUNT>
 {
   Status()
+    : array()
   {
     this->fill(' ');
   }
 };
 
-mutex printMutex;                                     ///< Mutex to unmangle cout output
-map<BufferContent, Status> statusMap;                 ///< Status of Produce-Consume
-atomic<bool> shouldStop(false);                       ///< Thread watch variable
-default_random_engine generator;                      ///< Random generator
-uniform_int_distribution<int> distribution(1, 1000);  ///< Random distribution
+static mutex printMutex;                                     ///< Mutex to unmangle cout output
+static map<BufferContent, Status> statusMap;                 ///< Status of Produce-Consume
+static atomic<bool> shouldStop(false);                       ///< Thread watch variable
+static default_random_engine generator;                      ///< Random generator
+static uniform_int_distribution<int> distribution(1, 1000);  ///< Random distribution
 
 /// Handler for Ctrl-C
 void SignalHandler(int)
@@ -49,7 +50,7 @@ void ClearTerminal()
   COORD const writeCoord{0, 0};
   CONSOLE_SCREEN_BUFFER_INFO s;
   (void)GetConsoleScreenBufferInfo(console, &s);
-  DWORD const length = s.dwSize.X * s.dwSize.Y;
+  auto const length = static_cast<DWORD>(s.dwSize.X * s.dwSize.Y);
 
   DWORD written;
   (void)FillConsoleOutputCharacter(console, ' ', length, writeCoord, &written);
@@ -125,14 +126,11 @@ try
     // simulate some processing delay
     this_thread::sleep_for(chrono::milliseconds(distribution(generator)));
   }
-
-  lock_guard<mutex> lock(printMutex);
-  cout << this_thread::get_id() << ": Releasing Consumer " << threadId << "...\n";
 }
 catch(future_error const &)
 {
   lock_guard<mutex> lock(printMutex);
-  cout << "Producer has left. Releasing Consumer...\n";
+  cout << "Producer has left. Releasing Consumer " << threadId << "...\n";
 }
 
 int main(int, char **)
