@@ -13,18 +13,6 @@
 
 namespace detail
 {
-  template<typename T>
-  void BreakPromise(std::promise<T> &promise)
-  {
-#if defined(_MSC_VER) && (_MSC_VER < 1900)
-    // workaround for MSVC2013 not breaking the promise when going out of scope unfulfilled
-    promise.set_exception(std::make_exception_ptr(
-      std::future_error(std::future_errc::broken_promise)));
-#else
-    (void)promise;
-#endif
-  }
-
   template<typename Buffer>
   struct SwitchBufferImpl
   {
@@ -100,34 +88,11 @@ namespace detail
       {}
 
       Consumer(const Consumer &other) = delete;
-
-      Consumer(Consumer &&other) noexcept
-        : parent(other.parent)
-        , pos(other.pos)
-        , isFull(other.isFull)
-        , isEmpty(other.isEmpty)
-        , sanctuary(std::move(other.sanctuary))
-        , promise(std::move(other.promise))
-      {}
-
-      ~Consumer()
-      {
-        if (promise)
-          BreakPromise(*promise);
-      }
+      Consumer(Consumer &&other) noexcept = default;
+      ~Consumer() = default;
 
       Consumer &operator=(const Consumer &other) = delete;
-
-      Consumer &operator=(Consumer &&other) noexcept
-      {
-        parent = other.parent;
-        pos = other.pos;
-        isFull = other.isFull;
-        isEmpty = other.isEmpty;
-        sanctuary = std::move(other.sanctuary);
-        promise = std::move(other.promise);
-        return *this;
-      }
+      Consumer &operator=(Consumer &&other) noexcept = default;
 
       // for use with std::find
       bool operator==(SwitchBufferConsumer<Buffer> const *otherParent) const
@@ -178,12 +143,8 @@ namespace detail
       producer.isClosed = true;
 
       // if there are open promises, break them
-      for(auto &&consumer : consumers) {
-        if (consumer.promise) {
-          BreakPromise(*consumer.promise);
-          consumer.promise.reset();
-        }
-      }
+      for (auto &&consumer : consumers)
+        consumer.promise.reset();
     }
 
     void CloseConsumer(SwitchBufferConsumer<Buffer> const *parent)
@@ -261,9 +222,7 @@ namespace detail
       } else {
         if (producer.isClosed) {
           // create a promise to be broken immediately
-          std::promise<Buffer const &> p;
-          BreakPromise(p);
-          return p.get_future();
+          return std::promise<Buffer const &>().get_future();
         } else {
           // create a promise to fulfill on next Production
           consumer.promise.reset(new std::promise<Buffer const &>());
@@ -347,8 +306,7 @@ SwitchBuffer<Buffer>::SwitchBuffer(size_t ringBufferSize)
 {}
 
 template<typename Buffer>
-SwitchBuffer<Buffer>::~SwitchBuffer()
-{}
+SwitchBuffer<Buffer>::~SwitchBuffer() = default;
 
 template<typename Buffer>
 SwitchBuffer<Buffer>::SwitchBuffer(SwitchBuffer<Buffer> &&other) noexcept
