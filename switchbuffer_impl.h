@@ -23,6 +23,7 @@ namespace std
     T &emplace(Args&&... args)
     {
       m_ptr.reset(new T(std::forward<Args>(args)...));
+      return *m_ptr;
     }
 
     void reset() noexcept
