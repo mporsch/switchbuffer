@@ -9,13 +9,16 @@
 #include <cassert>
 #include <iterator>
 #include <mutex>
-#include <vector>
-
 #if __cplusplus >= 201703L
 # include <optional>
-#else
-namespace std
+#endif // __cplusplus >= 201703L
+#include <vector>
+
+namespace detail
 {
+#if __cplusplus >= 201703L
+  using std::optional;
+#else
   template<typename T>
   struct optional
   {
@@ -44,11 +47,8 @@ namespace std
   private:
     std::unique_ptr<T> m_ptr;
   };
-}
 #endif // __cplusplus >= 201703L
 
-namespace detail
-{
   template<typename Buffer>
   struct SwitchBufferImpl
   {
@@ -113,7 +113,7 @@ namespace detail
       bool isFull; // flag whether ring is full of consumable slots
       bool isEmpty; // flag whether ring is empty of consumable slots
       std::unique_ptr<Buffer> sanctuary; // storage to save in-consumption buffer before being overwritten
-      std::optional<std::promise<Buffer const &>> promise; // promise to fulfill after empty ring
+      optional<std::promise<Buffer const &>> promise; // promise to fulfill after empty ring
 
       Consumer(SwitchBufferConsumer<Buffer> const *parent, Ring *ring)
         : parent(parent)
