@@ -200,8 +200,8 @@ namespace detail
       producer.curr = producer.next;
       ++producer.next;
 
-      // notify Consumers if something has been produced yet
-      // (the first call only provides the first buffer to the Producer)
+      // notify consumers if something has been produced yet
+      // (the first call only provides the first buffer to the producer)
       if (producer.curr) {
         for (auto &&consumer : consumers) {
           if (consumer.promise) {

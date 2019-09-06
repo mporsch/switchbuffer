@@ -13,7 +13,10 @@ namespace detail
 template<typename Buffer>
 class SwitchBuffer;
 
-/// SwitchBuffer interface to pass to the Producer
+/// @brief  interface to pass to the producer:
+///         provides non-blocking access to the underlying buffers
+///         and publishes to the consumers
+/// @note  create via the SwitchBuffer class
 template<typename Buffer>
 class SwitchBufferProducer
 {
@@ -27,7 +30,8 @@ public:
   SwitchBufferProducer &operator=(SwitchBufferProducer const &) = delete;
   SwitchBufferProducer &operator=(SwitchBufferProducer &&other) noexcept;
 
-  /// get a buffer to produce into
+  /// @brief  get a writable buffer to produce into
+  /// @note  all but the initial call also publish the previous buffer to the consumers
   Buffer &Switch();
 
 private:
@@ -38,7 +42,9 @@ private:
   std::shared_ptr<detail::SwitchBufferImpl<Buffer>> m_impl;
 };
 
-/// SwitchBuffer interface to pass to a Consumer
+/// @brief  interface to pass to a consumer:
+///         provides possibly-blocking access to the underlying buffers via Switch method
+/// @note  create via the SwitchBuffer class
 template<typename Buffer>
 class SwitchBufferConsumer
 {
@@ -52,7 +58,10 @@ public:
   SwitchBufferConsumer &operator=(SwitchBufferConsumer const &) = delete;
   SwitchBufferConsumer &operator=(SwitchBufferConsumer &&other) = delete;
 
-  /// get a buffer to consume from
+  /// @brief  get a readable buffer to consume from
+  /// @param[in]  skipToMostRecent  false to switch the the next buffer in the queue,
+  ///                               true to switch to the most recent buffer in the queue and
+  ///                               permanently skip all intermediates
   std::future<Buffer const &> Switch(bool skipToMostRecent = false);
 
 private:
@@ -63,7 +72,7 @@ private:
   std::shared_ptr<detail::SwitchBufferImpl<Buffer>> m_impl;
 };
 
-/// SwitchBuffer master interface to distribute Producer and Consumer interfaces
+/// SwitchBuffer master interface to distribute producer and consumer interfaces
 template<typename Buffer>
 class SwitchBuffer
 {
@@ -80,10 +89,10 @@ public:
   SwitchBuffer &operator=(SwitchBuffer const &) = delete;
   SwitchBuffer &operator=(SwitchBuffer &&other) noexcept;
 
-  /// get an interface to pass to the Producer
+  /// get an interface to pass to the producer
   Producer GetProducer();
 
-  /// get an interface to pass to a Consumer
+  /// get an interface to pass to a consumer
   Consumer GetConsumer();
 
 private:
