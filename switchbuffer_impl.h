@@ -308,19 +308,6 @@ SwitchBufferConsumer<Buffer>::~SwitchBufferConsumer()
 }
 
 template<typename Buffer>
-SwitchBufferConsumer<Buffer>::SwitchBufferConsumer(SwitchBufferConsumer<Buffer> &&other) noexcept
-  : m_impl(std::move(other.m_impl))
-{}
-
-template<typename Buffer>
-SwitchBufferConsumer<Buffer> &
-SwitchBufferConsumer<Buffer>::operator=(SwitchBufferConsumer<Buffer> &&other) noexcept
-{
-  m_impl = std::move(other.m_impl);
-  return *this;
-}
-
-template<typename Buffer>
 std::future<Buffer const &> SwitchBufferConsumer<Buffer>::Switch(bool skipToMostRecent)
 {
   return m_impl->SwitchConsumer(this, skipToMostRecent);

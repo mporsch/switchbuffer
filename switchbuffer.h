@@ -46,11 +46,11 @@ class SwitchBufferConsumer
 
 public:
   SwitchBufferConsumer(SwitchBufferConsumer const &) = delete;
-  SwitchBufferConsumer(SwitchBufferConsumer &&other) noexcept;
+  SwitchBufferConsumer(SwitchBufferConsumer &&other) = delete;
   ~SwitchBufferConsumer();
 
   SwitchBufferConsumer &operator=(SwitchBufferConsumer const &) = delete;
-  SwitchBufferConsumer &operator=(SwitchBufferConsumer &&other) noexcept;
+  SwitchBufferConsumer &operator=(SwitchBufferConsumer &&other) = delete;
 
   /// get a buffer to consume from
   std::future<Buffer const &> Switch(bool skipToMostRecent = false);
