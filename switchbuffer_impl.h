@@ -97,11 +97,13 @@ namespace detail
     {
       RingIterator curr; // points to the most recently produced buffer, initialized to invalid
       RingIterator next; // points to the in-production buffer, initialized to invalid
+      RingIterator olde; // points to the oldest produced buffer, initialized to invalid
       bool isClosed; // flag whether producer has shut down
 
       Producer(Ring *ring)
         : curr(ring)
         , next(ring)
+        , olde(ring)
         , isClosed(false)
       {}
     };
@@ -200,9 +202,11 @@ namespace detail
       producer.curr = producer.next;
       ++producer.next;
 
-      // notify consumers if something has been produced yet
-      // (the first call only provides the first buffer to the producer)
       if (producer.curr) {
+        // keep track of the oldest produced buffer
+        producer.olde = (producer.olde ? std::next(producer.olde) : producer.curr);
+
+        // notify consumers that something has been produced
         for (auto &&consumer : consumers) {
           if (consumer.promise) {
             assert(consumer.isEmpty);
@@ -224,6 +228,8 @@ namespace detail
             }
           }
         }
+      } else {
+        // no consumable buffer yet
       }
 
       return **producer.next;
@@ -239,23 +245,7 @@ namespace detail
       assert(it != std::end(consumers));
       auto &&consumer = *it;
 
-      // buffer immediately ready if something has been produced yet and ring is non-empty (except for first call)
-      if (producer.curr && (!consumer.isEmpty || !consumer.pos)) {
-        // advance ring iterator
-        if (skipToMostRecent) {
-          consumer.pos = producer.curr;
-          consumer.isEmpty = true;
-        } else {
-          ++consumer.pos;
-          consumer.isEmpty = (consumer.pos == producer.curr);
-        }
-        consumer.isFull = false;
-
-        // return buffer immediately
-        std::promise<Buffer const &> p;
-        p.set_value(**consumer.pos);
-        return p.get_future();
-      } else {
+      if (consumer.isEmpty) {
         if (producer.isClosed) {
           // create a promise to be broken immediately
           return std::promise<Buffer const &>().get_future();
@@ -264,6 +254,21 @@ namespace detail
           consumer.promise.emplace();
           return consumer.promise->get_future();
         }
+      } else {
+        // advance ring iterator
+        if (skipToMostRecent) {
+          consumer.pos = producer.curr;
+          consumer.isEmpty = true;
+        } else {
+          consumer.pos = (consumer.pos ? std::next(consumer.pos) : producer.olde);
+          consumer.isEmpty = (consumer.pos == producer.curr);
+        }
+        consumer.isFull = false;
+
+        // return buffer immediately
+        std::promise<Buffer const &> p;
+        p.set_value(**consumer.pos);
+        return p.get_future();
       }
     }
   };
