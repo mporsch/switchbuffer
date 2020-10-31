@@ -201,11 +201,13 @@ namespace detail
       // advance ring iterators
       producer.curr = producer.next;
       ++producer.next;
+      if (producer.olde == producer.next) {
+        ++producer.olde;
+      } else if (!producer.olde) {
+        producer.olde = producer.curr;
+      }
 
       if (producer.curr) {
-        // keep track of the oldest produced buffer
-        producer.olde = (producer.olde ? std::next(producer.olde) : producer.curr);
-
         // notify consumers that something has been produced
         for (auto &&consumer : consumers) {
           if (consumer.promise) {
